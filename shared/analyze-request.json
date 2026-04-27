@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "AnalyzeRequest",
+  "type": "object",
+  "properties": {
+    "target": { "type": "string" },
+    "sensitive": { "type": "string" },
+    "query": { "type": "string", "default": "check bias" },
+    "file": { "type": "string", "description": "CSV file sent as multipart form-data" }
+  },
+  "required": ["target", "sensitive", "file"],
+  "additionalProperties": false
+}

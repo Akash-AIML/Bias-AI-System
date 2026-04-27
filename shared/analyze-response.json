@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "AnalyzeResponse",
+  "type": "object",
+  "properties": {
+    "bias": { "type": "boolean" },
+    "dp_diff": { "type": "number" },
+    "eo_diff": { "type": "number" },
+    "group_metrics": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "properties": {
+          "accuracy": { "type": "number" },
+          "selection_rate": { "type": "number" }
+        },
+        "required": ["accuracy", "selection_rate"]
+      }
+    },
+    "suggestions": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "explanation": { "type": "string" },
+    "summary": { "type": "string" },
+    "report_text": { "type": "string" },
+    "intent": { "type": "string" },
+    "domain": { "type": "string" }
+  },
+  "required": [
+    "bias",
+    "dp_diff",
+    "eo_diff",
+    "group_metrics",
+    "suggestions",
+    "explanation",
+    "summary",
+    "report_text",
+    "intent",
+    "domain"
+  ],
+  "additionalProperties": false
+}
