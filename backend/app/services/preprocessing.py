@@ -12,6 +12,7 @@ class PreprocessedData:
     dataframe: pd.DataFrame
     features: pd.DataFrame
     labels: pd.Series
+    prediction_values: pd.Series | None
     sensitive_values: pd.Series
     numeric_features: list[str]
     categorical_features: list[str]
@@ -29,7 +30,12 @@ def _fill_missing_values(df: pd.DataFrame) -> pd.DataFrame:
     return filled_df
 
 
-def load_and_preprocess(file_bytes: bytes, target: str, sensitive: str) -> PreprocessedData:
+def load_and_preprocess(
+    file_bytes: bytes,
+    target: str,
+    sensitive: str,
+    prediction_column: str | None = None,
+) -> PreprocessedData:
     try:
         df = pd.read_csv(BytesIO(file_bytes))
     except Exception as error:
@@ -41,15 +47,22 @@ def load_and_preprocess(file_bytes: bytes, target: str, sensitive: str) -> Prepr
         raise ValueError(f"Sensitive column '{sensitive}' not found in dataset")
     if target == sensitive:
         raise ValueError("Target and sensitive columns must be different")
+    if prediction_column and prediction_column not in df.columns:
+        raise ValueError(f"Prediction column '{prediction_column}' not found in dataset")
+    if prediction_column and prediction_column in {target, sensitive}:
+        raise ValueError("Prediction column must be different from target and sensitive columns")
 
     cleaned_df = _fill_missing_values(df)
 
-    labels = cleaned_df[target].astype(str)
+    labels = cleaned_df[target]
     sensitive_values = cleaned_df[sensitive].astype(str)
+    prediction_values = cleaned_df[prediction_column] if prediction_column else None
     features = cleaned_df.drop(columns=[target])
 
     if sensitive in features.columns:
         features = features.drop(columns=[sensitive])
+    if prediction_column and prediction_column in features.columns:
+        features = features.drop(columns=[prediction_column])
 
     if features.empty:
         raise ValueError("Dataset must contain at least one feature column besides target and sensitive")
@@ -68,17 +81,25 @@ def load_and_preprocess(file_bytes: bytes, target: str, sensitive: str) -> Prepr
         dataframe=cleaned_df,
         features=features,
         labels=labels,
+        prediction_values=prediction_values,
         sensitive_values=sensitive_values,
         numeric_features=numeric_features,
         categorical_features=categorical_features,
     )
 
 
-def dataset_profile(df: pd.DataFrame, target: str, sensitive: str) -> dict[str, Any]:
+def dataset_profile(
+    df: pd.DataFrame,
+    target: str,
+    sensitive: str,
+    prediction_column: str | None = None,
+) -> dict[str, Any]:
     return {
         "rows": int(df.shape[0]),
         "columns": int(df.shape[1]),
         "target": target,
         "sensitive": sensitive,
+        "prediction_column": prediction_column,
+        "has_predictions": prediction_column is not None,
         "column_names": list(df.columns),
     }

@@ -5,6 +5,7 @@
   "properties": {
     "target": { "type": "string" },
     "sensitive": { "type": "string" },
+    "prediction_column": { "type": "string" },
     "query": { "type": "string", "default": "check bias" },
     "file": { "type": "string", "description": "CSV file sent as multipart form-data" }
   },

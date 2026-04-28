@@ -6,14 +6,14 @@ type SuggestionBoxProps = {
 
 export function SuggestionBox({ suggestions }: SuggestionBoxProps) {
   return (
-    <Card>
+    <Card className="animate-fade-rise">
       <CardHeader>
         <CardTitle>Mitigation Suggestions</CardTitle>
       </CardHeader>
       <CardContent>
-        <ul className="m-0 pl-5">
+        <ul className="m-0 space-y-2 pl-5">
           {suggestions.map((suggestion) => (
-            <li key={suggestion} className="mb-2 text-sm leading-6">
+            <li key={suggestion} className="animate-slide-up text-sm leading-6 text-slate-700">
               {suggestion}
             </li>
           ))}

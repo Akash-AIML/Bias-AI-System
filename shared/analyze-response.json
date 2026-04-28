@@ -25,7 +25,44 @@
     "summary": { "type": "string" },
     "report_text": { "type": "string" },
     "intent": { "type": "string" },
-    "domain": { "type": "string" }
+    "domain": { "type": "string" },
+    "audit_mode": { "type": "string" },
+    "warnings": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "audit_report": {
+      "type": "object",
+      "properties": {
+        "mode": { "type": "string" },
+        "verdict": { "type": "string" },
+        "metrics": {
+          "type": "object",
+          "properties": {
+            "dp_diff": { "type": "number" },
+            "eo_diff": { "type": "number" }
+          },
+          "required": ["dp_diff", "eo_diff"]
+        },
+        "group_metrics": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "accuracy": { "type": "number" },
+              "selection_rate": { "type": "number" }
+            },
+            "required": ["accuracy", "selection_rate"]
+          }
+        },
+        "warnings": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "reliability_note": { "type": "string" }
+      },
+      "required": ["mode", "verdict", "metrics", "group_metrics", "warnings", "reliability_note"]
+    }
   },
   "required": [
     "bias",
@@ -37,7 +74,10 @@
     "summary",
     "report_text",
     "intent",
-    "domain"
+    "domain",
+    "audit_mode",
+    "warnings",
+    "audit_report"
   ],
   "additionalProperties": false
 }

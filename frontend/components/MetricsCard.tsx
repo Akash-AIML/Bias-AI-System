@@ -8,13 +8,13 @@ type MetricsCardProps = {
 
 export function MetricsCard({ label, value, helper }: MetricsCardProps) {
   return (
-    <Card>
+    <Card className="animate-fade-rise">
       <CardHeader>
-        <CardTitle>{label}</CardTitle>
+        <CardTitle className="text-sm font-medium text-slate-600">{label}</CardTitle>
       </CardHeader>
       <CardContent>
-        <div className="text-2xl font-bold">{value}</div>
-        {helper ? <p className="muted mt-2 text-sm">{helper}</p> : null}
+        <div className="text-3xl font-bold tracking-tight text-slate-900">{value}</div>
+        {helper ? <p className="mt-2 text-xs text-slate-500">{helper}</p> : null}
       </CardContent>
     </Card>
   );

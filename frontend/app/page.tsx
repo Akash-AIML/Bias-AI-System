@@ -1,14 +1,36 @@
 import { FileUpload } from "@/components/FileUpload";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Separator } from "@/components/ui/separator";
+import { ThemeToggle } from "@/components/ThemeToggle";
 
 export default function HomePage() {
   return (
     <main>
-      <div className="container">
-        <h1 className="mb-2 text-3xl font-bold">AI Fairness Audit System</h1>
-        <p className="muted mb-6">
-          Upload a CSV, select target and sensitive columns, and analyze bias with explainable results.
-        </p>
-        <FileUpload />
+      <div className="mx-auto max-w-5xl px-4 py-5 sm:px-6 lg:px-8">
+        <div className="mb-4 flex items-start justify-between gap-4">
+          <div>
+            <h1 className="text-4xl font-semibold tracking-tight text-[var(--text)] animate-fade-rise">
+              AI Fairness Audit System
+            </h1>
+            <p className="mt-2 max-w-2xl text-sm text-[var(--text-soft)] animate-fade-rise">
+              Upload a CSV, configure fairness columns, and generate mitigation-ready insights.
+            </p>
+          </div>
+          <ThemeToggle />
+        </div>
+
+        <Card className="animate-fade-rise">
+          <CardHeader>
+            <CardTitle className="text-xl">Audit workflow</CardTitle>
+            <p className="text-sm text-[var(--text-soft)]">
+              Structured upload, configuration, status, and preview zones.
+            </p>
+          </CardHeader>
+          <CardContent className="space-y-6">
+            <Separator />
+            <FileUpload />
+          </CardContent>
+        </Card>
       </div>
     </main>
   );
