@@ -22,10 +22,157 @@ class FairnessResult:
     bias: bool
     dp_diff: float
     eo_diff: float
+    bsi_score: float
     group_metrics: dict[str, dict[str, float]]
     audit_mode: str
     warnings: list[str]
     reliability_note: str
+    target_transformation: dict[str, object]
+
+
+def _compute_bsi(dp_diff: float, eo_diff: float, sensitive_values: pd.Series) -> float:
+    abs_dp = min(1.0, abs(dp_diff))
+    abs_eo = min(1.0, abs(eo_diff))
+
+    group_counts = Counter(sensitive_values.astype(str))
+    if not group_counts:
+        imbalance_score = 0.0
+    else:
+        max_count = max(group_counts.values())
+        min_count = min(group_counts.values())
+        if min_count == 0:
+            imbalance_score = 1.0
+        else:
+            ratio = max_count / min_count
+            imbalance_score = min(1.0, (ratio - 1.0) / 4.0)
+
+    bsi = 100.0 * (0.4 * abs_dp + 0.4 * abs_eo + 0.2 * imbalance_score)
+    return round(bsi, 2)
+
+
+def _normalize_binary_values(values: pd.Series) -> tuple[pd.Series, bool]:
+    unique_values = sorted(set(values.dropna().unique().tolist()))
+    if set(unique_values) == {0, 1}:
+        return values.astype(int), False
+    if set(unique_values) == {-1, 1}:
+        return values.map({-1: 0, 1: 1}).astype(int), True
+
+    mapping = {unique_values[0]: 0, unique_values[1]: 1}
+    return values.map(mapping).astype(int), True
+
+
+def _is_continuous_numeric(unique_count: int, sample_count: int) -> bool:
+    if sample_count == 0:
+        return False
+    unique_ratio = unique_count / sample_count
+    return unique_count > 10 and unique_ratio >= 0.10
+
+
+def _normalize_target(
+    labels: pd.Series, target_binarization_threshold: float | None
+) -> tuple[pd.Series, list[str], dict[str, object]]:
+    warnings: list[str] = []
+    numeric_labels = pd.to_numeric(labels, errors="coerce")
+    numeric_ratio = numeric_labels.notna().mean()
+
+    if numeric_ratio > 0.95:
+        numeric_values = numeric_labels.dropna()
+        unique_labels = sorted(set(numeric_values.unique().tolist()))
+        unique_count = len(unique_labels)
+
+        if unique_count < 2:
+            raise ValueError("Target column must contain at least two classes.")
+
+        if unique_count == 2:
+            y_true, did_normalize = _normalize_binary_values(numeric_labels)
+            if did_normalize:
+                warnings.append("Target values were normalized to binary values 0/1.")
+            return y_true, warnings, {
+                "source_type": "binary_numeric",
+                "method": "binary_normalization",
+                "mapping": {
+                    str(unique_labels[0]): 0,
+                    str(unique_labels[1]): 1,
+                },
+                "threshold": None,
+            }
+
+        if _is_continuous_numeric(unique_count=unique_count, sample_count=len(numeric_values)):
+            threshold = (
+                float(target_binarization_threshold)
+                if target_binarization_threshold is not None
+                else float(numeric_values.median())
+            )
+            y_true = (numeric_labels >= threshold).astype(int)
+            warnings.append(
+                f"Target was binarized using threshold {threshold:.6g} (>= threshold -> 1, below -> 0)."
+            )
+            return y_true, warnings, {
+                "source_type": "continuous_numeric",
+                "method": "threshold_binarization",
+                "mapping": {
+                    f"< {threshold:.6g}": 0,
+                    f">= {threshold:.6g}": 1,
+                },
+                "threshold": threshold,
+            }
+
+        counts = numeric_values.value_counts()
+        positive_label = counts.index[0]
+        y_true = (numeric_labels == positive_label).astype(int)
+        warnings.append(
+            "Target had more than two classes; converted to binary one-vs-rest using the most frequent class as positive."
+        )
+        return y_true, warnings, {
+            "source_type": "multiclass_numeric",
+            "method": "one_vs_rest_majority_positive",
+            "mapping": {
+                str(positive_label): 1,
+                "__all_other_classes__": 0,
+            },
+            "threshold": None,
+        }
+
+    normalized_labels = labels.astype(str)
+    unique_labels = sorted(set(normalized_labels.unique().tolist()))
+    unique_count = len(unique_labels)
+
+    if unique_count < 2:
+        raise ValueError("Target column must contain at least two classes.")
+
+    if unique_count == 2:
+        mapping = {
+            unique_labels[0]: 0,
+            unique_labels[1]: 1,
+        }
+        y_true = normalized_labels.map(mapping).astype(int)
+        return y_true, warnings, {
+            "source_type": "binary_categorical",
+            "method": "binary_encoding",
+            "mapping": {
+                unique_labels[0]: 0,
+                unique_labels[1]: 1,
+            },
+            "threshold": None,
+        }
+
+    counts = normalized_labels.value_counts()
+    positive_label = str(counts.index[0])
+    y_true = (normalized_labels == positive_label).astype(int)
+    warnings.append(
+        "Target had more than two classes; converted to binary one-vs-rest using the most frequent class as positive."
+    )
+    return y_true, warnings, {
+        "source_type": "multiclass_categorical",
+        "method": "one_vs_rest_majority_positive",
+        "mapping": {
+            positive_label: 1,
+            "__all_other_classes__": 0,
+        },
+        "threshold": None,
+    }
+
+
 def _encode_binary(series: pd.Series) -> tuple[pd.Series, list[str]]:
     warnings: list[str] = []
     numeric_values = pd.to_numeric(series, errors="coerce")
@@ -35,10 +182,19 @@ def _encode_binary(series: pd.Series) -> tuple[pd.Series, list[str]]:
         if len(unique_values) > 2:
             warnings.append("Predictions were numeric; values were thresholded at 0.5.")
             return (numeric_values >= 0.5).astype(int), warnings
-        return numeric_values.astype(int), warnings
+        if len(unique_values) != 2:
+            raise ValueError("Prediction column must be binary for fairness analysis.")
+
+        normalized, did_normalize = _normalize_binary_values(numeric_values)
+        if did_normalize:
+            warnings.append("Predictions were normalized to binary values 0/1.")
+        return normalized, warnings
 
     label_encoder = LabelEncoder()
-    return pd.Series(label_encoder.fit_transform(series.astype(str))), warnings
+    encoded = pd.Series(label_encoder.fit_transform(series.astype(str)))
+    if len(label_encoder.classes_) != 2:
+        raise ValueError("Prediction column must be binary for fairness analysis.")
+    return encoded, warnings
 
 
 
@@ -70,34 +226,29 @@ def compute_fairness(
     numeric_features: list[str],
     categorical_features: list[str],
     threshold: float = 0.10,
+    target_binarization_threshold: float | None = None,
 ) -> FairnessResult:
     if len(features) < 20:
         raise ValueError("Dataset is too small for fairness analysis. Provide at least 20 rows.")
 
-    warnings: list[str] = []
-    numeric_labels = pd.to_numeric(labels, errors="coerce")
-    if numeric_labels.notna().mean() > 0.95:
-        unique_labels = sorted(set(numeric_labels.dropna().unique().tolist()))
-        if len(unique_labels) != 2:
-            raise ValueError(
-                "Target column must be binary for fairness analysis. "
-                "Provide a binary label or upload model predictions to audit directly."
-            )
-        y_true = numeric_labels.astype(int)
-    else:
-        label_encoder = LabelEncoder()
-        y_true = pd.Series(label_encoder.fit_transform(labels.astype(str)))
+    y_true, warnings, target_transformation = _normalize_target(
+        labels=labels,
+        target_binarization_threshold=target_binarization_threshold,
+    )
 
     if len(set(y_true)) < 2:
         raise ValueError("Target column must contain at least two classes.")
     
     class_counts = Counter(y_true)
     min_class_count = min(class_counts.values())
-    if min_class_count < 5:
+    if min_class_count < 2:
         raise ValueError(
-            "This dataset cannot support reliable fairness analysis because class counts are too small. "
-            f"The smallest class has only {min_class_count} samples. "
-            "Upload a larger sample or choose another target."
+            "Target binarization produced a class with fewer than 2 samples. "
+            "Choose a different target or provide a target threshold."
+        )
+    if min_class_count < 5:
+        warnings.append(
+            f"Minority class has only {min_class_count} samples; fairness metrics may be less reliable."
         )
 
     audit_mode = "predictions" if predictions is not None else "proxy"
@@ -145,6 +296,8 @@ def compute_fairness(
         )
     )
 
+    bsi_score = _compute_bsi(dp_diff=dp_diff, eo_diff=eo_diff, sensitive_values=pd.Series(sensitive_test))
+
     group_accuracy = MetricFrame(
         metrics=accuracy_score,
         y_true=y_true_values,
@@ -173,8 +326,10 @@ def compute_fairness(
         bias=is_biased,
         dp_diff=round(dp_diff, 4),
         eo_diff=round(eo_diff, 4),
+        bsi_score=bsi_score,
         group_metrics=group_metrics,
         audit_mode=audit_mode,
         warnings=warnings,
         reliability_note=reliability_note,
+        target_transformation=target_transformation,
     )

@@ -1,37 +1,55 @@
 "use client";
 
-import { useEffect } from "react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useRef } from "react";
 import { useRouter } from "next/navigation";
-import { Info } from "lucide-react";
+import { UploadCloud, Database, Target, Shield, Info, ArrowRight, Settings2, CheckCircle2, Play } from "lucide-react";
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
-import { Select } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
-import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import type { AnalyzeResponse } from "@/lib/types";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
 
+type ColumnSuggestionResponse = {
+  columns: string[];
+  target: string | null;
+  sensitive: string | null;
+  prediction_column: string | null;
+  time_column: string | null;
+  method: string;
+  notes: string[];
+};
+
 export function FileUpload() {
   const router = useRouter();
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [step, setStep] = useState<1 | 2 | 3>(1);
+  const [isHovering, setIsHovering] = useState(false);
+
   const [file, setFile] = useState<File | null>(null);
   const [columns, setColumns] = useState<string[]>([]);
   const [target, setTarget] = useState("");
   const [sensitive, setSensitive] = useState("");
   const [predictionColumn, setPredictionColumn] = useState("");
+  const [orgName, setOrgName] = useState("");
+  const [datasetName, setDatasetName] = useState("");
+  const [timeColumn, setTimeColumn] = useState("");
+  const [textColumns, setTextColumns] = useState("");
+  const [targetBinarizationThreshold, setTargetBinarizationThreshold] = useState("");
   const [query, setQuery] = useState("check bias");
+
   const [isLoading, setIsLoading] = useState(false);
   const [isParsing, setIsParsing] = useState(false);
   const [progress, setProgress] = useState(0);
   const [error, setError] = useState<string | null>(null);
+  const [autoMappingNote, setAutoMappingNote] = useState<string | null>(null);
 
   const selectableColumns = useMemo(() => columns, [columns]);
 
@@ -40,38 +58,96 @@ export function FileUpload() {
       setProgress(0);
       return;
     }
-
     const id = window.setInterval(() => {
       setProgress((prev) => (prev >= 90 ? 90 : prev + 10));
     }, 250);
-
     return () => window.clearInterval(id);
   }, [isLoading]);
 
   async function parseColumnsFromFile(selectedFile: File) {
     setIsParsing(true);
-    const text = await selectedFile.text();
-    localStorage.setItem("analysisFileContent", text);
-    const firstLine = text.split("\n")[0] ?? "";
-    const parsedColumns = firstLine
-      .split(",")
-      .map((column) => column.trim().replaceAll('"', ""))
-      .filter(Boolean);
+    try {
+      const text = await selectedFile.text();
+      localStorage.setItem("analysisFileContent", text);
+      const firstLine = text.split("\n")[0] ?? "";
+      const parsedColumns = firstLine
+        .split(",")
+        .map((column) => column.trim().replaceAll('"', ""))
+        .filter(Boolean);
 
-    setColumns(parsedColumns);
-    setTarget(parsedColumns[0] ?? "");
-    setSensitive(parsedColumns[1] ?? "");
-    setPredictionColumn("");
-    setIsParsing(false);
+      setColumns(parsedColumns);
+      setTarget("");
+      setSensitive("");
+      setPredictionColumn("");
+      setTimeColumn("");
+      setTextColumns("");
+      setFile(selectedFile);
+
+      try {
+        const suggestionPayload = new FormData();
+        suggestionPayload.append("file", selectedFile);
+        const suggestionResponse = await fetch(`${API_BASE_URL}/column-suggestions`, {
+          method: "POST",
+          body: suggestionPayload,
+        });
+
+        if (suggestionResponse.ok) {
+          const suggestions = (await suggestionResponse.json()) as ColumnSuggestionResponse;
+          setColumns(suggestions.columns?.length ? suggestions.columns : parsedColumns);
+          setTarget(suggestions.target ?? "");
+          setSensitive(suggestions.sensitive ?? "");
+          setPredictionColumn(suggestions.prediction_column ?? "");
+          setTimeColumn(suggestions.time_column ?? "");
+          setAutoMappingNote(
+            suggestions.notes?.length
+              ? `Auto-mapped using ${suggestions.method}: ${suggestions.notes.join(" ")}`
+              : `Auto-mapped using ${suggestions.method}.`
+          );
+        } else {
+          setAutoMappingNote("Auto-mapping could not run; please confirm target and sensitive columns.");
+        }
+      } catch {
+        setAutoMappingNote("Auto-mapping could not run; please confirm target and sensitive columns.");
+      }
+
+      setStep(2); // Move to next step automatically
+    } catch {
+      setError("Failed to parse file. Ensure it is a valid CSV.");
+    } finally {
+      setIsParsing(false);
+    }
   }
+
+  const handleDrop = async (e: React.DragEvent) => {
+    e.preventDefault();
+    setIsHovering(false);
+    const droppedFile = e.dataTransfer.files[0];
+    if (droppedFile && droppedFile.name.endsWith(".csv")) {
+      await parseColumnsFromFile(droppedFile);
+    } else {
+      setError("Please drop a valid .csv file.");
+    }
+  };
 
   async function handleAnalyze() {
     if (!file) {
       setError("Please upload a CSV file.");
+      setStep(1);
       return;
     }
     if (!target || !sensitive) {
       setError("Please select both target and sensitive columns.");
+      setStep(2);
+      return;
+    }
+    if (predictionColumn && (predictionColumn === target || predictionColumn === sensitive)) {
+      setError("Prediction column must be different from target and sensitive columns.");
+      setStep(2);
+      return;
+    }
+    if (targetBinarizationThreshold.trim() && Number.isNaN(Number(targetBinarizationThreshold.trim()))) {
+      setError("Target threshold must be a valid number.");
+      setStep(3);
       return;
     }
 
@@ -85,8 +161,13 @@ export function FileUpload() {
       payload.append("target", target);
       payload.append("sensitive", sensitive);
       payload.append("query", query || "check bias");
-      if (predictionColumn) {
-        payload.append("prediction_column", predictionColumn);
+      if (predictionColumn) payload.append("prediction_column", predictionColumn);
+      if (orgName.trim()) payload.append("org_name", orgName.trim());
+      if (datasetName.trim()) payload.append("dataset_name", datasetName.trim());
+      if (timeColumn) payload.append("time_column", timeColumn);
+      if (textColumns.trim()) payload.append("text_columns", textColumns.trim());
+      if (targetBinarizationThreshold.trim()) {
+        payload.append("target_binarization_threshold", targetBinarizationThreshold.trim());
       }
 
       const response = await fetch(`${API_BASE_URL}/analyze`, {
@@ -104,198 +185,267 @@ export function FileUpload() {
       localStorage.setItem("analysisResult", JSON.stringify(result));
       localStorage.setItem(
         "analysisMeta",
-        JSON.stringify({ filename: file.name, target, sensitive, predictionColumn, query })
+        JSON.stringify({
+          filename: file.name,
+          target,
+          sensitive,
+          predictionColumn,
+          query,
+          orgName,
+          datasetName,
+          timeColumn,
+          textColumns,
+          targetBinarizationThreshold,
+          uploadedAt: new Date().toISOString(),
+        })
       );
       router.push("/results");
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : "Unexpected error");
-    } finally {
       setIsLoading(false);
     }
   }
 
+  const renderColumnSelector = (label: string, icon: React.ReactNode, value: string, setter: (val: string) => void, tooltip: string) => {
+    return (
+      <Card className="overflow-hidden border border-slate-200/50 shadow-sm transition-all hover:border-slate-300 dark:border-slate-800 dark:hover:border-slate-700">
+        <CardContent className="p-4 sm:p-6">
+          <div className="mb-4 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400">
+                {icon}
+              </div>
+              <h3 className="font-semibold text-[var(--text)]">{label}</h3>
+              <Tooltip>
+                <TooltipTrigger>
+                  <Info size={14} className="text-slate-400 hover:text-slate-600" />
+                </TooltipTrigger>
+                <TooltipContent>{tooltip}</TooltipContent>
+              </Tooltip>
+            </div>
+            {value && <CheckCircle2 size={18} className="text-emerald-500" />}
+          </div>
+          <div className="relative">
+            <select
+              title={`Select ${label}`}
+              value={value}
+              onChange={(e) => setter(e.target.value)}
+              className="w-full appearance-none rounded-md border border-slate-200 bg-white px-3 py-2 text-sm text-[var(--text)] outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400 dark:border-slate-800 dark:bg-slate-900 dark:focus:border-slate-600 dark:focus:ring-slate-600"
+            >
+              <option value="">Choose a column...</option>
+              {selectableColumns.map((col) => (
+                <option key={col} value={col}>
+                  {col}
+                </option>
+              ))}
+            </select>
+            <div className="pointer-events-none absolute right-3 top-2.5 text-slate-400">
+              <ArrowRight size={14} className="rotate-90" />
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+    );
+  };
+
   return (
     <TooltipProvider>
-      <div className="grid gap-6">
-        <Card className="animate-fade-rise">
-          <CardHeader>
-            <CardTitle>Upload</CardTitle>
-            <p className="text-sm text-[var(--text-soft)]">Select a CSV to initialize columns and start configuration.</p>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <Input
-              type="file"
-              accept=".csv"
-              onChange={async (event) => {
-                const selectedFile = event.target.files?.[0] ?? null;
-                setFile(selectedFile);
-                setColumns([]);
-                if (selectedFile) {
-                  await parseColumnsFromFile(selectedFile);
-                }
-              }}
-            />
+      <div className="mx-auto w-full max-w-4xl animate-fade-in space-y-8">
 
-            {isParsing ? (
-              <div className="space-y-2">
-                <Skeleton className="h-9 w-full" />
-                <Skeleton className="h-9 w-full" />
-              </div>
-            ) : null}
+        {/* Progress Stepper */}
+        <div className="flex items-center justify-between px-4">
+          <div className={`flex flex-col items-center gap-2 ${step >= 1 ? "text-[var(--text)]" : "text-slate-400"}`}>
+            <div className={`flex h-8 w-8 items-center justify-center rounded-full ${step >= 1 ? "bg-slate-900 text-white dark:bg-white dark:text-black" : "bg-slate-100"}`}>1</div>
+            <span className="text-xs font-medium uppercase tracking-wider">Upload</span>
+          </div>
+          <div className={`h-px flex-1 mx-4 ${step >= 2 ? "bg-slate-900 dark:bg-white" : "bg-slate-200 dark:bg-slate-800"}`} />
+          <div className={`flex flex-col items-center gap-2 ${step >= 2 ? "text-[var(--text)]" : "text-slate-400"}`}>
+            <div className={`flex h-8 w-8 items-center justify-center rounded-full ${step >= 2 ? "bg-slate-900 text-white dark:bg-white dark:text-black" : "bg-slate-100 dark:bg-slate-800"}`}>2</div>
+            <span className="text-xs font-medium uppercase tracking-wider">Map Data</span>
+          </div>
+          <div className={`h-px flex-1 mx-4 ${step >= 3 ? "bg-slate-900 dark:bg-white" : "bg-slate-200 dark:bg-slate-800"}`} />
+          <div className={`flex flex-col items-center gap-2 ${step >= 3 ? "text-[var(--text)]" : "text-slate-400"}`}>
+            <div className={`flex h-8 w-8 items-center justify-center rounded-full ${step >= 3 ? "bg-slate-900 text-white dark:bg-white dark:text-black" : "bg-slate-100 dark:bg-slate-800"}`}>3</div>
+            <span className="text-xs font-medium uppercase tracking-wider">Configure</span>
+          </div>
+        </div>
 
-            {file ? (
-              <div className="flex flex-wrap items-center gap-2 text-xs">
-                <Badge variant="secondary">{file.name}</Badge>
-                <Badge variant="secondary">{columns.length} columns found</Badge>
-              </div>
-            ) : null}
-          </CardContent>
-        </Card>
+        {error ? (
+          <Alert variant="destructive" className="animate-fade-in border-red-200 bg-red-50 text-red-900 dark:border-red-900/50 dark:bg-red-900/10 dark:text-red-200">
+            <AlertTitle className="font-semibold">Configuration Error</AlertTitle>
+            <AlertDescription>{error}</AlertDescription>
+          </Alert>
+        ) : null}
+        {autoMappingNote ? (
+          <Alert className="animate-fade-in">
+            <AlertTitle className="font-semibold">Auto Mapping</AlertTitle>
+            <AlertDescription>{autoMappingNote}</AlertDescription>
+          </Alert>
+        ) : null}
 
-        <Separator />
-
-        <Card className="animate-fade-rise">
-          <CardHeader>
-            <CardTitle>Configuration</CardTitle>
-            <p className="text-sm text-[var(--text-soft)]">Choose prediction target, sensitive attribute, and optional analysis query.</p>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <div>
-                <div className="mb-1 flex items-center gap-2 text-sm font-medium text-[var(--text)]">
-                  <span>Target Column</span>
-                  <Tooltip>
-                    <TooltipTrigger>
-                      <span tabIndex={0} className="inline-flex rounded text-slate-500">
-                        <Info size={14} />
-                      </span>
-                      <TooltipContent>
-                        Pick the outcome column you want to audit, usually a decision label such as approved/rejected.
-                      </TooltipContent>
-                    </TooltipTrigger>
-                  </Tooltip>
+        <div className="relative min-h-[400px]">
+          {/* STEP 1: UPLOAD */}
+          {step === 1 && (
+            <div className="animate-fade-in absolute inset-0">
+              <div
+                className={`flex h-full flex-col items-center justify-center rounded-xl border-2 border-dashed transition-all duration-200 ${isHovering ? "border-slate-400 bg-slate-50 dark:border-slate-500 dark:bg-slate-900/50" : "border-slate-200 bg-white/50 dark:border-slate-800 dark:bg-black/20"
+                  }`}
+                onDragOver={(e) => { e.preventDefault(); setIsHovering(true); }}
+                onDragLeave={() => setIsHovering(false)}
+                onDrop={handleDrop}
+              >
+                <div className="flex h-20 w-20 items-center justify-center rounded-full bg-slate-100 text-slate-500 mb-6 dark:bg-slate-900 dark:text-slate-400">
+                  <UploadCloud size={40} strokeWidth={1.5} />
                 </div>
-                <Select value={target} onChange={(event) => setTarget(event.target.value)}>
-                  <option value="">Select target column</option>
-                  {selectableColumns.map((column) => (
-                    <option key={column} value={column}>
-                      {column}
-                    </option>
-                  ))}
-                </Select>
-              </div>
+                <h2 className="text-xl font-semibold tracking-tight text-[var(--text)]">Upload your dataset</h2>
+                <p className="mt-2 text-center text-sm text-[var(--text-soft)] max-w-sm">
+                  Drag and drop your CSV file here, or click to browse. We&apos;ll automatically parse your columns for auditing.
+                </p>
 
-              <div>
-                <div className="mb-1 flex items-center gap-2 text-sm font-medium text-[var(--text)]">
-                  <span>Sensitive Attribute</span>
-                  <Tooltip>
-                    <TooltipTrigger>
-                      <span tabIndex={0} className="inline-flex rounded text-slate-500">
-                        <Info size={14} />
-                      </span>
-                      <TooltipContent>
-                        Pick the protected group column used for fairness comparison, such as gender or region.
-                      </TooltipContent>
-                    </TooltipTrigger>
-                  </Tooltip>
-                </div>
-                <Select value={sensitive} onChange={(event) => setSensitive(event.target.value)}>
-                  <option value="">Select sensitive column</option>
-                  {selectableColumns.map((column) => (
-                    <option key={column} value={column}>
-                      {column}
-                    </option>
-                  ))}
-                </Select>
+                <input
+                  type="file"
+                  accept=".csv"
+                  className="hidden"
+                  ref={fileInputRef}
+                  onChange={async (e) => {
+                    const f = e.target.files?.[0];
+                    if (f) await parseColumnsFromFile(f);
+                  }}
+                />
+                <Button
+                  onClick={() => fileInputRef.current?.click()}
+                  className="mt-8 px-8"
+                  variant="outline"
+                  disabled={isParsing}
+                >
+                  {isParsing ? "Reading Data..." : "Browse Files"}
+                </Button>
               </div>
             </div>
+          )}
 
-            <div>
-              <div className="mb-1 flex items-center gap-2 text-sm font-medium text-[var(--text)]">
-                <span>Prediction Column (optional)</span>
-                <Tooltip>
-                  <TooltipTrigger>
-                    <span tabIndex={0} className="inline-flex rounded text-slate-500">
-                      <Info size={14} />
-                    </span>
-                    <TooltipContent>
-                      Provide model predictions to audit real outputs. Leave blank to run a proxy audit.
-                    </TooltipContent>
-                  </TooltipTrigger>
-                </Tooltip>
+          {/* STEP 2: MAP DATA */}
+          {step === 2 && (
+            <div className="animate-fade-in absolute inset-0 space-y-6">
+              <div className="flex items-center justify-between rounded-lg border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-950">
+                <div className="flex items-center gap-4">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-full bg-emerald-100 text-emerald-600 dark:bg-emerald-900/30 dark:text-emerald-400">
+                    <Database size={20} />
+                  </div>
+                  <div>
+                    <h3 className="font-medium text-[var(--text)]">{file?.name}</h3>
+                    <p className="text-xs text-[var(--text-soft)]">{columns.length} columns detected</p>
+                  </div>
+                </div>
+                <Button variant="ghost" size="sm" onClick={() => setStep(1)} className="text-xs">Change File</Button>
               </div>
-              <Select value={predictionColumn} onChange={(event) => setPredictionColumn(event.target.value)}>
-                <option value="">No prediction column</option>
-                {selectableColumns.map((column) => (
-                  <option key={column} value={column}>
-                    {column}
-                  </option>
-                ))}
-              </Select>
+
+              <div className="grid gap-4 sm:grid-cols-2">
+                {renderColumnSelector(
+                  "Target Column",
+                  <Target size={16} />,
+                  target,
+                  setTarget,
+                  "Pick the outcome column you want to audit (e.g. approved/rejected)."
+                )}
+                {renderColumnSelector(
+                  "Sensitive Attribute",
+                  <Shield size={16} />,
+                  sensitive,
+                  setSensitive,
+                  "Protected group column used for fairness comparison (e.g. gender/race)."
+                )}
+                {renderColumnSelector(
+                  "Prediction (Optional)",
+                  <Play size={16} />,
+                  predictionColumn,
+                  setPredictionColumn,
+                  "Model predictions to audit real outputs. Leave blank for proxy audit."
+                )}
+                {renderColumnSelector(
+                  "Time Feature (Optional)",
+                  <Settings2 size={16} />,
+                  timeColumn,
+                  setTimeColumn,
+                  "Column indicating time, for temporal drift analysis."
+                )}
+              </div>
+
+              <div className="flex justify-end pt-4">
+                <Button onClick={() => setStep(3)} className="gap-2" disabled={!target || !sensitive}>
+                  Continue to Configuration <ArrowRight size={16} />
+                </Button>
+              </div>
             </div>
+          )}
 
-            <div>
-              <label className="mb-1 block text-sm font-medium text-[var(--text)]">Optional Query</label>
-              <Textarea
-                value={query}
-                onChange={(event) => setQuery(event.target.value)}
-                placeholder="check bias in selection decisions"
-              />
+          {/* STEP 3: CONFIGURE & RUN */}
+          {step === 3 && (
+            <div className="animate-fade-in absolute inset-0 rounded-xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-950 pb-20 overflow-y-auto">
+              <h2 className="mb-6 text-xl font-semibold tracking-tight text-[var(--text)]">Finalize Audit Parameters</h2>
+
+              <div className="space-y-6">
+                <div className="grid gap-6 sm:grid-cols-2">
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium text-[var(--text)]">Organization Name</label>
+                    <Input value={orgName} onChange={(e) => setOrgName(e.target.value)} placeholder="Acme Corp" className="h-11" />
+                  </div>
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium text-[var(--text)]">Dataset Name</label>
+                    <Input value={datasetName} onChange={(e) => setDatasetName(e.target.value)} placeholder="Q1 Hiring Decisions" className="h-11" />
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-sm font-medium text-[var(--text)]">Text Columns (Optional)</label>
+                  <Input value={textColumns} onChange={(e) => setTextColumns(e.target.value)} placeholder="job_description, interview_notes" className="h-11" />
+                  <p className="text-xs text-[var(--text-soft)]">Comma-separated columns containing free-form text for textual bias embeddings.</p>
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-sm font-medium text-[var(--text)]">Target Threshold (Optional)</label>
+                  <Input
+                    value={targetBinarizationThreshold}
+                    onChange={(e) => setTargetBinarizationThreshold(e.target.value)}
+                    placeholder="Auto median when empty"
+                    className="h-11"
+                    inputMode="decimal"
+                  />
+                  <p className="text-xs text-[var(--text-soft)]">
+                    Used only for continuous numeric targets. If blank, median is used.
+                  </p>
+                </div>
+
+                <div className="space-y-2">
+                  <label className="text-sm font-medium text-[var(--text)]">Audit Goal / Context Query</label>
+                  <Textarea
+                    value={query}
+                    onChange={(e) => setQuery(e.target.value)}
+                    placeholder="E.g., Ensure our resume screening process doesn't disadvantage specific demographics..."
+                    className="min-h-[100px] resize-none"
+                  />
+                </div>
+
+                {isLoading && (
+                  <div className="space-y-3 rounded-lg border border-slate-200 bg-slate-50 p-4 dark:border-slate-800 dark:bg-slate-900/50">
+                    <div className="flex justify-between text-sm font-medium">
+                      <span>Analyzing dataset and generating narrative...</span>
+                      <span>{progress}%</span>
+                    </div>
+                    <Progress value={progress} className="h-2" />
+                  </div>
+                )}
+              </div>
+
+              <div className="mt-8 flex justify-between">
+                <Button variant="ghost" onClick={() => setStep(2)}>Back</Button>
+                <Button onClick={handleAnalyze} disabled={isLoading} size="lg" className="min-w-[160px]">
+                  {isLoading ? "Auditing..." : "Run Complete Audit"}
+                </Button>
+              </div>
             </div>
-
-            {error ? (
-              <Alert variant="destructive">
-                <AlertTitle>Analysis warning</AlertTitle>
-                <AlertDescription>
-                  {error} Try selecting a binary/categorical target column or a column with enough samples per class.
-                </AlertDescription>
-              </Alert>
-            ) : null}
-
-            {isLoading ? (
-              <div className="space-y-2">
-                <div className="text-xs text-[var(--text-soft)]">Analysis in progress</div>
-                <Progress value={progress} />
-              </div>
-            ) : null}
-
-            <Button onClick={handleAnalyze} disabled={isLoading} className="w-full" size="lg">
-              {isLoading ? "Analyzing..." : "Analyze"}
-            </Button>
-          </CardContent>
-        </Card>
-
-        <Separator />
-
-        <Card className="animate-fade-rise">
-          <CardHeader>
-            <CardTitle>Results Preview</CardTitle>
-            <p className="text-sm text-[var(--text-soft)]">Preview current selection before running the fairness pipeline.</p>
-          </CardHeader>
-          <CardContent>
-            {!file ? (
-              <div className="space-y-2">
-                <Skeleton className="h-4 w-2/3" />
-                <Skeleton className="h-4 w-1/2" />
-              </div>
-            ) : (
-              <div className="grid gap-2 text-sm text-[var(--text)]">
-                <div>
-                  <span className="font-medium">Dataset:</span> {file.name}
-                </div>
-                <div>
-                  <span className="font-medium">Target:</span> {target || "Not selected"}
-                </div>
-                <div>
-                  <span className="font-medium">Sensitive:</span> {sensitive || "Not selected"}
-                </div>
-                <div>
-                  <span className="font-medium">Predictions:</span> {predictionColumn || "Proxy audit"}
-                </div>
-              </div>
-            )}
-          </CardContent>
-        </Card>
+          )}
+        </div>
       </div>
     </TooltipProvider>
   );

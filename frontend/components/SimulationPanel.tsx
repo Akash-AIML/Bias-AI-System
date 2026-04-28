@@ -2,6 +2,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 
 import type { GroupMetric } from "@/lib/types";
+import { ScrollArea } from "./ui/scroll-area";
 
 type SimulationPanelProps = {
   metrics: Record<string, GroupMetric>;
@@ -30,6 +31,7 @@ export function SimulationPanel({ metrics }: SimulationPanelProps) {
         </p>
       </CardHeader>
       <CardContent>
+        <ScrollArea className="max-h-64">
         <Table>
           <TableHeader>
             <TableRow>
@@ -47,7 +49,8 @@ export function SimulationPanel({ metrics }: SimulationPanelProps) {
               </TableRow>
             ))}
           </TableBody>
-        </Table>
+          </Table>
+          </ScrollArea>
       </CardContent>
     </Card>
   );

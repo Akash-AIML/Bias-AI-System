@@ -6,6 +6,14 @@
     "target": { "type": "string" },
     "sensitive": { "type": "string" },
     "prediction_column": { "type": "string" },
+    "org_name": { "type": "string" },
+    "dataset_name": { "type": "string" },
+    "time_column": { "type": "string" },
+    "text_columns": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "target_binarization_threshold": { "type": "number" },
     "query": { "type": "string", "default": "check bias" },
     "file": { "type": "string", "description": "CSV file sent as multipart form-data" }
   },

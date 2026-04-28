@@ -67,25 +67,38 @@ export default function ResultsPage() {
     if (!data) {
       return 0;
     }
-    const penalty = Math.min(1, (Math.abs(data.dp_diff) + Math.abs(data.eo_diff)) / 2);
-    return Math.round((1 - penalty) * 100);
+    return Math.round(data.bsi_score);
   }, [data]);
 
   const riskLabel = useMemo(() => {
-    if (fairnessScore >= 80) {
-      return "Low risk";
+    return data?.risk_tier.label ?? "Risk";
+  }, [data]);
+
+  const riskVariant = useMemo(() => {
+    if (!data) {
+      return "secondary";
     }
-    if (fairnessScore >= 60) {
-      return "Needs review";
+    if (data.risk_tier.level === "green") {
+      return "success";
     }
-    return "Bias detected";
-  }, [fairnessScore]);
+    if (data.risk_tier.level === "yellow") {
+      return "secondary";
+    }
+    return "destructive";
+  }, [data]);
 
   const auditModeLabel = useMemo(() => {
     if (!data) {
       return "Audit";
     }
     return data.audit_mode === "predictions" ? "Prediction audit" : "Proxy audit";
+  }, [data]);
+
+  const targetMappingRows = useMemo(() => {
+    if (!data) {
+      return [];
+    }
+    return Object.entries(data.target_transformation.mapping ?? {});
   }, [data]);
 
   if (!data) {
@@ -144,10 +157,23 @@ export default function ResultsPage() {
         target: analysisMeta?.target ?? "-",
         sensitive: analysisMeta?.sensitive ?? "-",
         prediction_column: analysisMeta?.predictionColumn ?? "-",
+        org_name: analysisMeta?.orgName ?? "-",
+        dataset_name: analysisMeta?.datasetName ?? "-",
+        uploaded_at: analysisMeta?.uploadedAt ?? "-",
+      },
+      accountability_summary: {
+        audit_id: data.audit_id,
       },
       verdict: data.bias ? "bias_detected" : "no_severe_bias",
       dp_diff: data.dp_diff,
       eo_diff: data.eo_diff,
+      bsi_score: data.bsi_score,
+      risk_tier: data.risk_tier,
+      proxy_features: data.proxy_features,
+      temporal_drift: data.temporal_drift,
+      text_bias: data.text_bias,
+      legal_context: data.legal_context,
+      audit_narrative: data.audit_narrative,
       group_metrics: data.group_metrics,
       suggestions: data.suggestions,
       audit_mode: data.audit_mode,
@@ -167,7 +193,7 @@ export default function ResultsPage() {
     const url = window.URL.createObjectURL(downloadBlob);
     const link = document.createElement("a");
     link.href = url;
-    link.download = "fairness_report.pdf";
+    link.download = "accountability_certificate.pdf";
     link.click();
     window.URL.revokeObjectURL(url);
   }
@@ -178,21 +204,21 @@ export default function ResultsPage() {
         <div className="flex items-start justify-between gap-4">
           <div>
             <h1 className="text-4xl font-semibold tracking-tight text-[var(--text)] animate-fade-rise">
-              Bias Analysis Dashboard
+              Accountability Audit Dashboard
             </h1>
             <p className="mt-2 max-w-2xl text-sm text-[var(--text-soft)] animate-fade-rise">
-              Review fairness metrics, mitigation guidance, and LLM interpretation.
+              Review bias severity, proxy discrimination signals, and compliance-ready findings.
             </p>
           </div>
-          <ThemeToggle />
         </div>
 
         <Card className="animate-fade-rise">
           <CardContent className="space-y-5 pt-6">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div className="flex flex-wrap items-center gap-2">
-                <Badge variant={data.bias ? "destructive" : "success"}>{riskLabel}</Badge>
-                <Badge variant="secondary">Fairness score {fairnessScore}/100</Badge>
+                <Badge variant={riskVariant}>{riskLabel}</Badge>
+                <Badge variant="secondary">Bias Severity Index {fairnessScore}/100</Badge>
+                <Badge variant="secondary">Audit ID {data.audit_id}</Badge>
                 <Badge variant="secondary">{auditModeLabel}</Badge>
               </div>
               <div className="flex flex-wrap items-center gap-3">
@@ -203,7 +229,7 @@ export default function ResultsPage() {
                   Download reweighted CSV
                 </Button>
                 <Button variant="outline" onClick={downloadReport} size="lg">
-                  Download PDF report
+                  Download certificate
                 </Button>
                 <Button variant="outline" onClick={() => setShowSheet(true)} size="lg">
                   <PanelRightOpen size={16} className="mr-1" />
@@ -232,10 +258,42 @@ export default function ResultsPage() {
           </Alert>
         ) : null}
 
+        <Card>
+          <CardHeader>
+            <CardTitle>Target Transformation</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2 text-sm text-[var(--text)]">
+            <p>
+              <span className="font-medium">Source type:</span> {data.target_transformation.source_type}
+            </p>
+            <p>
+              <span className="font-medium">Method:</span> {data.target_transformation.method}
+            </p>
+            <p>
+              <span className="font-medium">Threshold:</span>{" "}
+              {data.target_transformation.threshold === null ? "Not used" : data.target_transformation.threshold}
+            </p>
+            <div>
+              <p className="font-medium">Mapping</p>
+              <ul className="mt-1 list-disc pl-5">
+                {targetMappingRows.map(([label, value]) => (
+                  <li key={label}>
+                    {label} {"->"} {value}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </CardContent>
+        </Card>
+
         <Tabs defaultValue="metrics" className="animate-fade-rise">
           <TabsList>
             <TabsTrigger value="metrics">Metrics</TabsTrigger>
             <TabsTrigger value="mitigation">Mitigation</TabsTrigger>
+            <TabsTrigger value="accountability">Accountability</TabsTrigger>
+            <TabsTrigger value="bias-tracer">Bias Tracer</TabsTrigger>
+            <TabsTrigger value="temporal">Temporal Drift</TabsTrigger>
+            <TabsTrigger value="language">Language Bias</TabsTrigger>
             <TabsTrigger value="explanation">Explanation</TabsTrigger>
           </TabsList>
 
@@ -243,6 +301,7 @@ export default function ResultsPage() {
             <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
               <MetricsCard label="Demographic Parity Diff" value={data.dp_diff.toFixed(4)} />
               <MetricsCard label="Equalized Odds Diff" value={data.eo_diff.toFixed(4)} />
+              <MetricsCard label="BSI Score" value={data.bsi_score.toFixed(2)} helper={data.risk_tier.action} />
               <MetricsCard label="Intent" value={data.intent} helper={`Domain: ${data.domain}`} />
             </div>
 
@@ -288,6 +347,149 @@ export default function ResultsPage() {
             <SuggestionBox suggestions={data.suggestions} />
           </TabsContent>
 
+          <TabsContent value="accountability" className="space-y-4">
+            <Card>
+              <CardHeader>
+                <CardTitle>Legal Context</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-2 text-sm text-[var(--text)]">
+                <p>
+                  <span className="font-medium">Domain:</span> {data.legal_context.domain}
+                </p>
+                <p>
+                  <span className="font-medium">Framework:</span> {data.legal_context.framework}
+                </p>
+                <p>{data.legal_context.notes}</p>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader>
+                <CardTitle>Audit Narrative</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3 text-sm text-[var(--text)]">
+                <p>{data.audit_narrative.executive_summary}</p>
+                <Separator />
+                <p>{data.audit_narrative.risk_assessment}</p>
+                <p>{data.audit_narrative.legal_exposure}</p>
+                <Separator />
+                <div>
+                  <p className="font-medium">Key Findings</p>
+                  <ul className="mt-1 list-disc pl-5">
+                    {data.audit_narrative.findings.map((finding) => (
+                      <li key={finding}>{finding}</li>
+                    ))}
+                  </ul>
+                </div>
+                <div>
+                  <p className="font-medium">Recommended Actions</p>
+                  <ul className="mt-1 list-disc pl-5">
+                    {data.audit_narrative.recommended_actions.map((action) => (
+                      <li key={action}>{action}</li>
+                    ))}
+                  </ul>
+                </div>
+                <div>
+                  <p className="font-medium">Counterfactuals</p>
+                  <ul className="mt-1 list-disc pl-5">
+                    {data.audit_narrative.counterfactuals.map((item) => (
+                      <li key={item}>{item}</li>
+                    ))}
+                  </ul>
+                </div>
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          <TabsContent value="bias-tracer">
+            <Card>
+              <CardHeader>
+                <CardTitle>Proxy Feature Correlations</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Feature</TableHead>
+                      <TableHead>Correlation</TableHead>
+                      <TableHead>Direction</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {data.proxy_features.map((proxy) => (
+                      <TableRow key={proxy.feature}>
+                        <TableCell>{proxy.feature}</TableCell>
+                        <TableCell>{proxy.correlation.toFixed(4)}</TableCell>
+                        <TableCell>{proxy.direction}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          <TabsContent value="temporal">
+            <Card>
+              <CardHeader>
+                <CardTitle>Temporal Drift</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-2 text-sm text-[var(--text)]">
+                <p>
+                  <span className="font-medium">Status:</span> {data.temporal_drift.status}
+                </p>
+                <p>
+                  <span className="font-medium">Time Column:</span> {data.temporal_drift.time_column ?? "Not detected"}
+                </p>
+                <p>
+                  <span className="font-medium">Early BSI:</span> {data.temporal_drift.early_bsi ?? "-"}
+                </p>
+                <p>
+                  <span className="font-medium">Late BSI:</span> {data.temporal_drift.late_bsi ?? "-"}
+                </p>
+                <p>
+                  <span className="font-medium">Delta:</span> {data.temporal_drift.delta ?? "-"}
+                </p>
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          <TabsContent value="language" className="space-y-4">
+            <Card>
+              <CardHeader>
+                <CardTitle>Language Bias Findings</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3 text-sm text-[var(--text)]">
+                <p>{data.text_bias.summary}</p>
+                <p>
+                  <span className="font-medium">Text Columns:</span>{" "}
+                  {data.text_bias.columns.length ? data.text_bias.columns.join(", ") : "None"}
+                </p>
+                <Separator />
+                <div>
+                  <p className="font-medium">Sentiment Gaps</p>
+                  <ul className="mt-1 list-disc pl-5">
+                    {data.text_bias.sentiment_gaps.map((gap) => (
+                      <li key={`${gap.column}-${gap.group_a}-${gap.group_b}`}>
+                        {gap.column}: {gap.group_a} vs {gap.group_b} gap {gap.gap.toFixed(3)}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+                <div>
+                  <p className="font-medium">Top Terms by Group</p>
+                  <ul className="mt-1 list-disc pl-5">
+                    {data.text_bias.top_terms.map((entry) => (
+                      <li key={`${entry.column}-${entry.group}`}>
+                        {entry.column} ({entry.group}): {entry.terms.join(", ") || "-"}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              </CardContent>
+            </Card>
+          </TabsContent>
+
           <TabsContent value="explanation">
             <Card>
               <CardHeader>
@@ -300,6 +502,9 @@ export default function ResultsPage() {
                 <Separator />
                 <p>{data.report_text}</p>
                 <Separator />
+                <p className="text-xs text-[var(--text-soft)]">
+                  Audit mode: {auditModeLabel}. Target transformation: {data.target_transformation.method}.
+                </p>
                 <p className="text-xs text-[var(--text-soft)]">{data.audit_report.reliability_note}</p>
               </CardContent>
             </Card>
@@ -342,6 +547,28 @@ export default function ResultsPage() {
               </div>
               <div>
                 <span className="font-medium">Predictions:</span> {analysisMeta?.predictionColumn ?? "Proxy audit"}
+              </div>
+              <div>
+                <span className="font-medium">Organization:</span> {analysisMeta?.orgName ?? "Not set"}
+              </div>
+              <div>
+                <span className="font-medium">Dataset:</span> {analysisMeta?.datasetName ?? "Not set"}
+              </div>
+              <div>
+                <span className="font-medium">Time column:</span> {analysisMeta?.timeColumn ?? "Auto"}
+              </div>
+              <div>
+                <span className="font-medium">Text columns:</span> {analysisMeta?.textColumns ?? "Auto"}
+              </div>
+              <div>
+                <span className="font-medium">Target threshold:</span>{" "}
+                {analysisMeta?.targetBinarizationThreshold || "Median (auto)"}
+              </div>
+              <div>
+                <span className="font-medium">Audit ID:</span> {data.audit_id}
+              </div>
+              <div>
+                <span className="font-medium">Uploaded:</span> {analysisMeta?.uploadedAt ?? "-"}
               </div>
               <div>
                 <span className="font-medium">Query:</span> {analysisMeta?.query ?? "check bias"}

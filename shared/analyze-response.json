@@ -4,8 +4,119 @@
   "type": "object",
   "properties": {
     "bias": { "type": "boolean" },
+    "audit_id": { "type": "string" },
     "dp_diff": { "type": "number" },
     "eo_diff": { "type": "number" },
+    "bsi_score": { "type": "number" },
+    "risk_tier": {
+      "type": "object",
+      "properties": {
+        "level": { "type": "string" },
+        "label": { "type": "string" },
+        "action": { "type": "string" }
+      },
+      "required": ["level", "label", "action"]
+    },
+    "proxy_features": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "feature": { "type": "string" },
+          "correlation": { "type": "number" },
+          "direction": { "type": "string" }
+        },
+        "required": ["feature", "correlation", "direction"]
+      }
+    },
+    "temporal_drift": {
+      "type": "object",
+      "properties": {
+        "status": { "type": "string" },
+        "time_column": { "type": ["string", "null"] },
+        "early_bsi": { "type": ["number", "null"] },
+        "late_bsi": { "type": ["number", "null"] },
+        "delta": { "type": ["number", "null"] }
+      },
+      "required": ["status", "time_column", "early_bsi", "late_bsi", "delta"]
+    },
+    "text_bias": {
+      "type": "object",
+      "properties": {
+        "has_text_columns": { "type": "boolean" },
+        "columns": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "sentiment_gaps": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "column": { "type": "string" },
+              "group_a": { "type": "string" },
+              "group_b": { "type": "string" },
+              "gap": { "type": "number" }
+            },
+            "required": ["column", "group_a", "group_b", "gap"]
+          }
+        },
+        "top_terms": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "column": { "type": "string" },
+              "group": { "type": "string" },
+              "terms": {
+                "type": "array",
+                "items": { "type": "string" }
+              }
+            },
+            "required": ["column", "group", "terms"]
+          }
+        },
+        "summary": { "type": "string" }
+      },
+      "required": ["has_text_columns", "columns", "sentiment_gaps", "top_terms", "summary"]
+    },
+    "legal_context": {
+      "type": "object",
+      "properties": {
+        "domain": { "type": "string" },
+        "framework": { "type": "string" },
+        "notes": { "type": "string" }
+      },
+      "required": ["domain", "framework", "notes"]
+    },
+    "audit_narrative": {
+      "type": "object",
+      "properties": {
+        "executive_summary": { "type": "string" },
+        "findings": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "risk_assessment": { "type": "string" },
+        "legal_exposure": { "type": "string" },
+        "recommended_actions": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "counterfactuals": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      },
+      "required": [
+        "executive_summary",
+        "findings",
+        "risk_assessment",
+        "legal_exposure",
+        "recommended_actions",
+        "counterfactuals"
+      ]
+    },
     "group_metrics": {
       "type": "object",
       "additionalProperties": {
@@ -30,6 +141,19 @@
     "warnings": {
       "type": "array",
       "items": { "type": "string" }
+    },
+    "target_transformation": {
+      "type": "object",
+      "properties": {
+        "source_type": { "type": "string" },
+        "method": { "type": "string" },
+        "mapping": {
+          "type": "object",
+          "additionalProperties": { "type": "number" }
+        },
+        "threshold": { "type": ["number", "null"] }
+      },
+      "required": ["source_type", "method", "mapping", "threshold"]
     },
     "audit_report": {
       "type": "object",
@@ -59,15 +183,36 @@
           "type": "array",
           "items": { "type": "string" }
         },
+        "target_transformation": {
+          "type": "object",
+          "properties": {
+            "source_type": { "type": "string" },
+            "method": { "type": "string" },
+            "mapping": {
+              "type": "object",
+              "additionalProperties": { "type": "number" }
+            },
+            "threshold": { "type": ["number", "null"] }
+          },
+          "required": ["source_type", "method", "mapping", "threshold"]
+        },
         "reliability_note": { "type": "string" }
       },
-      "required": ["mode", "verdict", "metrics", "group_metrics", "warnings", "reliability_note"]
+      "required": ["mode", "verdict", "metrics", "group_metrics", "warnings", "target_transformation", "reliability_note"]
     }
   },
   "required": [
     "bias",
+    "audit_id",
     "dp_diff",
     "eo_diff",
+    "bsi_score",
+    "risk_tier",
+    "proxy_features",
+    "temporal_drift",
+    "text_bias",
+    "legal_context",
+    "audit_narrative",
     "group_metrics",
     "suggestions",
     "explanation",
@@ -77,6 +222,7 @@
     "domain",
     "audit_mode",
     "warnings",
+    "target_transformation",
     "audit_report"
   ],
   "additionalProperties": false

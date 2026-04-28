@@ -6,17 +6,16 @@ import { ThemeToggle } from "@/components/ThemeToggle";
 export default function HomePage() {
   return (
     <main>
-      <div className="mx-auto max-w-5xl px-4 py-5 sm:px-6 lg:px-8">
-        <div className="mb-4 flex items-start justify-between gap-4">
-          <div>
-            <h1 className="text-4xl font-semibold tracking-tight text-[var(--text)] animate-fade-rise">
-              AI Fairness Audit System
+      <div className="mx-auto mb-10 max-w-5xl px-4 py-5 sm:px-6 lg:px-8">
+        <div className="mb-6 flex items-start justify-between gap-4">
+          <div className="space-y-3 mt-5">
+            <h1 className="text-5xl font-semibold text-[var(--text)] animate-fade-rise">
+              AI Accountability Audit System
             </h1>
-            <p className="mt-2 max-w-2xl text-sm text-[var(--text-soft)] animate-fade-rise">
-              Upload a CSV, configure fairness columns, and generate mitigation-ready insights.
+            <p className="max-w-2xl text-sm text-[var(--text-soft)] animate-fade-rise">
+              Upload a CSV, configure accountability inputs, and generate compliance-ready findings.
             </p>
           </div>
-          <ThemeToggle />
         </div>
 
         <Card className="animate-fade-rise">

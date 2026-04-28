@@ -1,0 +1,21 @@
+.git
+.gitignore
+.venv
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+
+# Keep image backend-only
+frontend
+
+# Local/build artifacts
+node_modules
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+dist
+build
+.next
+.pytest_cache
+.mypy_cache
