@@ -28,7 +28,31 @@ class LLMService:
                 s = s[first_newline:].strip()
             if s.endswith("```"):
                 s = s[:-3].strip()
-        return json.loads(s)
+        
+        try:
+            return json.loads(s)
+        except json.JSONDecodeError as e:
+            if "Unterminated string" in str(e) or "Expecting" in str(e):
+                for closure in ['"', '"}', '"]}', '"]} }', '"} }', '"} } }']:
+                    try:
+                        return json.loads(s + closure)
+                    except json.JSONDecodeError:
+                        pass
+                
+                last_quote = s.rfind('"')
+                if last_quote > 0:
+                    s_chopped = s[:last_quote].strip()
+                    if s_chopped.endswith(','):
+                        s_chopped = s_chopped[:-1]
+                    elif s_chopped.endswith(':'):
+                        s_chopped += ' null'
+                    
+                    for closure in ['}', ']}', '}]}', '}}', '}}}']:
+                        try:
+                            return json.loads(s_chopped + closure)
+                        except json.JSONDecodeError:
+                            pass
+            raise e
 
     def infer_intent(self, query: str, dataset_context: dict[str, Any]) -> dict[str, str]:
         if not query.strip():
@@ -813,13 +837,13 @@ class LLMService:
             "1. 'intent': 'bias_detection' or 'mitigation'.\n"
             "2. 'domain': Classified domain ('hiring', 'credit', 'housing', 'healthcare', or 'general').\n"
             "3. 'legal_context': Object containing 'domain' (same as above), 'framework' (e.g. EEOC/Title VII (4/5ths rule), FCRA, FHA, ACA, etc.), and 'notes' (legal implications for this audit).\n"
-            "4. 'warnings': List of rewritten raw warnings for a business executive (no technical jargon, mention specific groups/numbers). Preserve EXACT count of input raw_warnings.\n"
-            "5. 'info_notes': List of rewritten raw info notes. Preserve EXACT count of input raw_info_notes.\n"
-            "6. 'suggestions': Exactly 4 actionable mitigation recommendations. Must name specific groups, numbers, or features from context. No generic templates (e.g. adjust decision thresholds, apply reweighting). If no bias is detected, return exactly 1 item: 'No severe bias detected. Continue monitoring with periodic fairness checks.'.\n"
+            "4. 'warnings': Rewrite each raw warning dynamically for a business executive (no technical jargon, mention specific groups/numbers). Do NOT copy the raw input verbatim. Preserve EXACT count of input raw_warnings.\n"
+            "5. 'info_notes': Rewrite each raw info note dynamically. Do NOT copy the raw input verbatim. Preserve EXACT count of input raw_notes.\n"
+            "6. 'suggestions': Exactly 4 actionable mitigation recommendations. Must name specific groups, numbers, or features from context. No generic templates (e.g. adjust decision thresholds, apply reweighting). If no bias is detected, return 1-2 dynamic recommendations on how to maintain fairness, monitor specific features, or improve data collection, specifically mentioning the domain and dataset.\n"
             "7. 'explanation': Concise explanation of parity gaps and BSI for non-technical users in plain language.\n"
             "8. 'summary': Verdict summary. Do not claim disadvantage if both parity gaps are near zero.\n"
             "9. 'report_text': Concise summary suitable for a final compliance report.\n"
-            "10. 'counterfactuals': List of counterfactual statements for disadvantaged groups based on selection rates.\n"
+            "10. 'counterfactuals': List of counterfactual statements for disadvantaged groups based on selection rates. Make it conversational and dynamic. If there is no gap, state dynamically that outcomes are equitable across groups.\n"
             "11. 'audit_narrative': Object with:\n"
             "    - 'executive_summary': 2-3 sentences overview of the audit findings.\n"
             "    - 'findings': List of bullet points detailing top proxy features, drift, text bias, etc.\n"
@@ -829,7 +853,7 @@ class LLMService:
             "--- CRITICAL JSON COMPLIANCE RULES ---\n"
             "1. Do NOT use double quotes inside string fields under any circumstances. If quoting is needed inside string fields, use single quotes (e.g. 'male|25'). Any unescaped double quotes within JSON values will cause a JSON parsing failure.\n"
             "2. All string values must be properly escaped JSON strings.\n"
-            "3. Keep all text fields short, concise, and to-the-point to ensure it fits in the token limit.\n"
+            "3. Keep all text fields EXTREMELY short (1-2 sentences max) to ensure the response fits within the strict API token limits.\n"
             "4. Return ONLY valid JSON matching the schema.\n\n"
             "--- STRICT OUTPUT SCHEMA ---\n"
             "Your output must be ONLY a valid JSON object matching this structure (do not include any additional keys, or markdown fences except the JSON itself):\n"
