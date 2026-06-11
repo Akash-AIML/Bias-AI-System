@@ -10,8 +10,8 @@ from openai import OpenAI
 class LLMService:
     def __init__(self) -> None:
         api_key = os.getenv("LLM_API_KEY")
-        base_url = os.getenv("LLM_BASE_URL")
-        self.model = os.getenv("LLM_MODEL", "llama3-8b-8192")
+        base_url = os.getenv("LLM_BASE_URL", "https://generativelanguage.googleapis.com/v1beta/openai/")
+        self.model = os.getenv("LLM_MODEL", "gemini-1.5-flash")
         self.client = None
 
         if api_key:
@@ -333,7 +333,7 @@ class LLMService:
         mode_text = "Direct model predictions were audited." if audit_mode == "predictions" else "A proxy model was used because predictions were not provided."
         warning_text = ""
         if warnings:
-            warning_text = f" Notes: {warnings[0]}"
+            warning_text = f" Notes: {'; '.join(warnings)}"
 
         report_text = (
             f"{mode_text} {reliability_note} Recommended actions: {'; '.join(suggestions)}.{warning_text}"

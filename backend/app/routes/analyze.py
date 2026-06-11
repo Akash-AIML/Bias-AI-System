@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from io import BytesIO
 import uuid
+import time
 from typing import Any
 
 import pandas as pd
@@ -60,8 +61,10 @@ class AnalyzeResponse(BaseModel):
     domain: str
     audit_mode: str
     warnings: list[str]
+    info_notes: list[str] = []
     target_transformation: dict[str, Any]
     audit_report: dict[str, Any]
+    mitigation_simulations: list[dict[str, Any]] = []
 
 
 class ReportRequest(BaseModel):
@@ -80,6 +83,7 @@ class ReportRequest(BaseModel):
     group_metrics: dict[str, dict[str, float]]
     suggestions: list[str]
     audit_mode: str
+    warnings: list[str] = []
 
 
 class ColumnSuggestionResponse(BaseModel):
@@ -102,7 +106,10 @@ async def column_suggestions(file: UploadFile = File(...)) -> ColumnSuggestionRe
         raise HTTPException(status_code=400, detail="Uploaded file is empty")
 
     try:
+        print("[SERVICES] Starting suggest_column_roles...")
+        t0 = time.time()
         payload = suggest_column_roles(file_bytes)
+        print(f"[SERVICES] Completed suggest_column_roles in {time.time() - t0:.3f}s")
     except ValueError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
 
@@ -135,6 +142,8 @@ async def analyze_dataset(
             if text_columns
             else None
         )
+        print("[SERVICES] Starting load_and_preprocess...")
+        t_pre = time.time()
         preprocessed = load_and_preprocess(
             file_bytes,
             target=target,
@@ -143,11 +152,14 @@ async def analyze_dataset(
             time_column=time_column,
             text_columns=text_column_list,
         )
+        print(f"[SERVICES] Completed load_and_preprocess in {time.time() - t_pre:.3f}s")
     except ValueError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
 
     audit_id = f"AUD-{uuid.uuid4().hex[:10]}"
 
+    print("[SERVICES] Starting llm_service.infer_intent...")
+    t_llm1 = time.time()
     intent_payload = llm_service.infer_intent(
         query=query,
         dataset_context=dataset_profile(
@@ -157,7 +169,10 @@ async def analyze_dataset(
             prediction_column=prediction_column,
         ),
     )
+    print(f"[SERVICES] Completed llm_service.infer_intent in {time.time() - t_llm1:.3f}s")
 
+    print("[SERVICES] Starting llm_service.classify_legal_context...")
+    t_llm2 = time.time()
     legal_context = llm_service.classify_legal_context(
         query=query,
         dataset_context=dataset_profile(
@@ -167,6 +182,7 @@ async def analyze_dataset(
             prediction_column=prediction_column,
         ),
     )
+    print(f"[SERVICES] Completed llm_service.classify_legal_context in {time.time() - t_llm2:.3f}s")
 
     base_features = preprocessed.features.drop(columns=preprocessed.text_columns, errors="ignore")
     if preprocessed.time_column and preprocessed.time_column in base_features.columns:
@@ -195,7 +211,10 @@ async def analyze_dataset(
     analysis_warnings: list[str] = []
     if preprocessed.text_columns:
         try:
+            print("[SERVICES] Starting encode_text_columns...")
+            t_text = time.time()
             text_embeddings = encode_text_columns(preprocessed.dataframe, preprocessed.text_columns)
+            print(f"[SERVICES] Completed encode_text_columns in {time.time() - t_text:.3f}s")
             analysis_features = pd.concat([analysis_features, text_embeddings], axis=1)
             analysis_numeric_features.extend(text_embeddings.columns.tolist())
         except Exception:
@@ -210,6 +229,8 @@ async def analyze_dataset(
         )
 
     try:
+        print("[SERVICES] Starting compute_fairness...")
+        t_fair = time.time()
         fairness_result = compute_fairness(
             features=analysis_features,
             labels=preprocessed.labels,
@@ -219,15 +240,31 @@ async def analyze_dataset(
             categorical_features=analysis_categorical_features,
             target_binarization_threshold=target_binarization_threshold,
         )
+        print(f"[SERVICES] Completed compute_fairness in {time.time() - t_fair:.3f}s")
     except ValueError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
     fairness_result.warnings.extend(analysis_warnings)
 
+    print("[SERVICES] Starting classify_risk and trace_bias_proxies...")
+    t_risk = time.time()
+    risk_tier = classify_risk(fairness_result.bsi_score)
+    proxy_features = trace_bias_proxies(base_features, preprocessed.sensitive_values)
+    print(f"[SERVICES] Completed classify_risk and trace_bias_proxies in {time.time() - t_risk:.3f}s")
+
+    for proxy in proxy_features:
+        if proxy.correlation > 0.5:
+            fairness_result.warnings.append(
+                f"High proxy discrimination risk: Feature '{proxy.feature}' is highly correlated with the sensitive attribute (correlation: {proxy.correlation:.4f})."
+            )
+
+    print("[SERVICES] Starting suggest_mitigations...")
+    t_sug = time.time()
     suggestions = suggest_mitigations(
         dp_diff=fairness_result.dp_diff,
         eo_diff=fairness_result.eo_diff,
         bias_detected=fairness_result.bias,
     )
+    print(f"[SERVICES] Completed suggest_mitigations in {time.time() - t_sug:.3f}s")
 
     if intent_payload["intent"] == "mitigation" and len(suggestions) > 1:
         suggestions = [
@@ -235,6 +272,8 @@ async def analyze_dataset(
             *suggestions,
         ]
 
+    print("[SERVICES] Starting llm_service.generate_explanation...")
+    t_llm3 = time.time()
     explanation_payload = llm_service.generate_explanation(
         dp_diff=fairness_result.dp_diff,
         eo_diff=fairness_result.eo_diff,
@@ -246,9 +285,10 @@ async def analyze_dataset(
         target_transformation=fairness_result.target_transformation,
         warnings=fairness_result.warnings,
     )
+    print(f"[SERVICES] Completed llm_service.generate_explanation in {time.time() - t_llm3:.3f}s")
 
-    risk_tier = classify_risk(fairness_result.bsi_score)
-    proxy_features = trace_bias_proxies(base_features, preprocessed.sensitive_values)
+    print("[SERVICES] Starting analyze_temporal_drift...")
+    t_temp = time.time()
     temporal_drift = analyze_temporal_drift(
         dataframe=preprocessed.dataframe,
         time_column=preprocessed.time_column,
@@ -259,6 +299,9 @@ async def analyze_dataset(
         categorical_features=temporal_categorical_features,
         target_binarization_threshold=target_binarization_threshold,
     )
+    print(f"[SERVICES] Completed analyze_temporal_drift in {time.time() - t_temp:.3f}s")
+    print("[SERVICES] Starting analyze_text_bias...")
+    t_text_bias = time.time()
     try:
         text_bias = analyze_text_bias(
             dataframe=preprocessed.dataframe,
@@ -274,12 +317,18 @@ async def analyze_dataset(
         fairness_result.warnings.append(
             "Text bias analysis failed; language findings are unavailable for this dataset."
         )
+    print(f"[SERVICES] Completed analyze_text_bias in {time.time() - t_text_bias:.3f}s")
 
+    print("[SERVICES] Starting llm_service.generate_counterfactuals...")
+    t_llm4 = time.time()
     counterfactuals = llm_service.generate_counterfactuals(
         group_metrics=fairness_result.group_metrics,
         domain=legal_context.get("domain", "general"),
     )
+    print(f"[SERVICES] Completed llm_service.generate_counterfactuals in {time.time() - t_llm4:.3f}s")
 
+    print("[SERVICES] Starting llm_service.generate_audit_narrative...")
+    t_llm5 = time.time()
     audit_narrative = llm_service.generate_audit_narrative(
         legal_context=legal_context,
         bsi_score=fairness_result.bsi_score,
@@ -290,7 +339,10 @@ async def analyze_dataset(
         suggestions=suggestions,
         counterfactuals=counterfactuals,
     )
+    print(f"[SERVICES] Completed llm_service.generate_audit_narrative in {time.time() - t_llm5:.3f}s")
 
+    print("[SERVICES] Starting simulate_mitigation...")
+    t_sim = time.time()
     simulations = simulate_mitigation(
         dataframe=preprocessed.dataframe,
         target=target,
@@ -300,6 +352,7 @@ async def analyze_dataset(
         categorical_features=temporal_categorical_features,
         target_binarization_threshold=target_binarization_threshold,
     )
+    print(f"[SERVICES] Completed simulate_mitigation in {time.time() - t_sim:.3f}s")
 
     audit_report = {
         "audit_id": audit_id,
@@ -347,8 +400,10 @@ async def analyze_dataset(
         domain=legal_context.get("domain", intent_payload["domain"]),
         audit_mode=fairness_result.audit_mode,
         warnings=fairness_result.warnings,
+        info_notes=fairness_result.info_notes,
         target_transformation=fairness_result.target_transformation,
         audit_report=audit_report,
+        mitigation_simulations=[simulation.__dict__ for simulation in simulations],
     )
 
 
@@ -357,6 +412,7 @@ async def reweighted_csv(
     file: UploadFile = File(...),
     sensitive: str = Form(...),
     target: str = Form(...),
+    target_binarization_threshold: float | None = Form(None),
 ) -> StreamingResponse:
     if not _is_supported_csv_upload(file):
         raise HTTPException(status_code=400, detail="Only CSV files are supported")
@@ -366,11 +422,22 @@ async def reweighted_csv(
         raise HTTPException(status_code=400, detail="Uploaded file is empty")
 
     try:
+        print("[SERVICES] Starting load_and_preprocess...")
+        t_pre = time.time()
         preprocessed = load_and_preprocess(file_bytes, target=target, sensitive=sensitive)
+        print(f"[SERVICES] Completed load_and_preprocess in {time.time() - t_pre:.3f}s")
     except ValueError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
 
-    reweighted = apply_group_reweighting(preprocessed.dataframe, sensitive_column=sensitive)
+    print("[SERVICES] Starting apply_group_reweighting...")
+    t_rew = time.time()
+    reweighted = apply_group_reweighting(
+        preprocessed.dataframe,
+        sensitive_column=sensitive,
+        target_column=target,
+        target_binarization_threshold=target_binarization_threshold,
+    )
+    print(f"[SERVICES] Completed apply_group_reweighting in {time.time() - t_rew:.3f}s")
     output = BytesIO()
     reweighted.to_csv(output, index=False)
     output.seek(0)
@@ -385,7 +452,10 @@ async def reweighted_csv(
 
 @router.post("/report")
 async def generate_report(payload: ReportRequest) -> StreamingResponse:
+    print("[SERVICES] Starting build_fairness_report...")
+    t_rep = time.time()
     pdf_bytes = build_fairness_report(payload.model_dump())
+    print(f"[SERVICES] Completed build_fairness_report in {time.time() - t_rep:.3f}s")
     return StreamingResponse(
         BytesIO(pdf_bytes),
         media_type="application/pdf",
@@ -439,6 +509,8 @@ async def intersectional_analysis(
         column for column in features.columns if column not in numeric_features
     ]
 
+    print("[SERVICES] Starting compute_fairness...")
+    t_fair = time.time()
     fairness_result = compute_fairness(
         features=features,
         labels=labels,
@@ -448,15 +520,33 @@ async def intersectional_analysis(
         categorical_features=categorical_features,
         target_binarization_threshold=target_binarization_threshold,
     )
+    print(f"[SERVICES] Completed compute_fairness in {time.time() - t_fair:.3f}s")
 
     audit_id = f"AUD-{uuid.uuid4().hex[:10]}"
 
+    print("[SERVICES] Starting classify_risk and trace_bias_proxies...")
+    t_risk = time.time()
+    risk_tier = classify_risk(fairness_result.bsi_score)
+    proxy_features = trace_bias_proxies(features, combined_sensitive)
+    print(f"[SERVICES] Completed classify_risk and trace_bias_proxies in {time.time() - t_risk:.3f}s")
+
+    for proxy in proxy_features:
+        if proxy.correlation > 0.5:
+            fairness_result.warnings.append(
+                f"High proxy discrimination risk: Feature '{proxy.feature}' is highly correlated with the sensitive attribute (correlation: {proxy.correlation:.4f})."
+            )
+
+    print("[SERVICES] Starting suggest_mitigations...")
+    t_sug = time.time()
     suggestions = suggest_mitigations(
         dp_diff=fairness_result.dp_diff,
         eo_diff=fairness_result.eo_diff,
         bias_detected=fairness_result.bias,
     )
+    print(f"[SERVICES] Completed suggest_mitigations in {time.time() - t_sug:.3f}s")
 
+    print("[SERVICES] Starting llm_service.generate_explanation...")
+    t_llm_exp = time.time()
     explanation_payload = llm_service.generate_explanation(
         dp_diff=fairness_result.dp_diff,
         eo_diff=fairness_result.eo_diff,
@@ -468,9 +558,8 @@ async def intersectional_analysis(
         target_transformation=fairness_result.target_transformation,
         warnings=fairness_result.warnings,
     )
-
-    risk_tier = classify_risk(fairness_result.bsi_score)
-    proxy_features = trace_bias_proxies(features, combined_sensitive)
+    print(f"[SERVICES] Completed llm_service.generate_explanation in {time.time() - t_llm_exp:.3f}s")
+    
     temporal_drift = {
         "status": "not_available",
         "time_column": None,
@@ -485,6 +574,8 @@ async def intersectional_analysis(
         "top_terms": [],
         "summary": "Text bias analysis not run for intersectional audits.",
     }
+    print("[SERVICES] Starting llm_service.classify_legal_context...")
+    t_llm_leg = time.time()
     legal_context = llm_service.classify_legal_context(
         query="intersectional_analysis",
         dataset_context=dataset_profile(
@@ -494,10 +585,18 @@ async def intersectional_analysis(
             prediction_column=prediction_column,
         ),
     )
+    print(f"[SERVICES] Completed llm_service.classify_legal_context in {time.time() - t_llm_leg:.3f}s")
+    
+    print("[SERVICES] Starting llm_service.generate_counterfactuals...")
+    t_llm_count = time.time()
     counterfactuals = llm_service.generate_counterfactuals(
         group_metrics=fairness_result.group_metrics,
         domain=legal_context.get("domain", "general"),
     )
+    print(f"[SERVICES] Completed llm_service.generate_counterfactuals in {time.time() - t_llm_count:.3f}s")
+    
+    print("[SERVICES] Starting llm_service.generate_audit_narrative...")
+    t_llm_narr = time.time()
     audit_narrative = llm_service.generate_audit_narrative(
         legal_context=legal_context,
         bsi_score=fairness_result.bsi_score,
@@ -508,6 +607,7 @@ async def intersectional_analysis(
         suggestions=suggestions,
         counterfactuals=counterfactuals,
     )
+    print(f"[SERVICES] Completed llm_service.generate_audit_narrative in {time.time() - t_llm_narr:.3f}s")
 
     audit_report = {
         "audit_id": audit_id,
@@ -554,6 +654,7 @@ async def intersectional_analysis(
         domain=legal_context.get("domain", "general"),
         audit_mode=fairness_result.audit_mode,
         warnings=fairness_result.warnings,
+        info_notes=fairness_result.info_notes,
         target_transformation=fairness_result.target_transformation,
         audit_report=audit_report,
     )

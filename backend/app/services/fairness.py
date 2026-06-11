@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections import Counter
 from dataclasses import dataclass
 
+import numpy as np
 import pandas as pd
 from fairlearn.metrics import (
     MetricFrame,
@@ -26,6 +27,7 @@ class FairnessResult:
     group_metrics: dict[str, dict[str, float]]
     audit_mode: str
     warnings: list[str]
+    info_notes: list[str]
     reliability_note: str
     target_transformation: dict[str, object]
 
@@ -231,10 +233,56 @@ def compute_fairness(
     if len(features) < 20:
         raise ValueError("Dataset is too small for fairness analysis. Provide at least 20 rows.")
 
-    y_true, warnings, target_transformation = _normalize_target(
+    y_true, all_target_notes, target_transformation = _normalize_target(
         labels=labels,
         target_binarization_threshold=target_binarization_threshold,
     )
+
+    # Separate target normalization notes: binarization info is informational, not a warning
+    info_notes: list[str] = []
+    warnings: list[str] = []
+    for note in all_target_notes:
+        if any(token in note.lower() for token in (
+            "normalized to binary", "binarized using threshold", "converted to binary one-vs-rest"
+        )):
+            info_notes.append(note)
+        else:
+            warnings.append(note)
+
+    if len(features) < 100:
+        warnings.append(
+            f"Small dataset warning: Dataset has only {len(features)} rows. "
+            "Fairness analysis on small samples has lower statistical confidence."
+        )
+
+    # Check sensitive attribute imbalance
+    group_counts = Counter(sensitive_values.astype(str))
+    for group_name, count in group_counts.items():
+        if count < 10:
+            warnings.append(
+                f"Sensitive group '{group_name}' has only {count} samples; group-specific metrics may be less reliable."
+            )
+    if group_counts:
+        max_count = max(group_counts.values())
+        min_count = min(group_counts.values())
+        if min_count > 0:
+            ratio = max_count / min_count
+            if ratio > 5.0:
+                warnings.append(
+                    f"High sensitive attribute imbalance detected. The largest group ('{max(group_counts, key=group_counts.get)}') "
+                    f"is {ratio:.1f}x larger than the smallest group ('{min(group_counts, key=group_counts.get)}')."
+                )
+
+    # Check target class imbalance
+    positive_count = int(sum(y_true == 1))
+    total_count = len(y_true)
+    if total_count > 0:
+        positive_ratio = positive_count / total_count
+        if positive_ratio < 0.1 or positive_ratio > 0.9:
+            warnings.append(
+                f"Severe target class imbalance detected ({positive_ratio * 100:.1f}% positive). "
+                "Fairness metrics can be highly sensitive or misleading in imbalanced settings."
+            )
 
     if len(set(y_true)) < 2:
         raise ValueError("Target column must contain at least two classes.")
@@ -258,26 +306,63 @@ def compute_fairness(
         else "Proxy model used because no predictions were provided. Results are approximate."
     )
 
+    sample_weight = None
+    features_clean = features.copy()
+    if "sample_weight" in features_clean.columns:
+        sample_weight = features_clean["sample_weight"]
+        features_clean = features_clean.drop(columns=["sample_weight"])
+        numeric_features = [f for f in numeric_features if f != "sample_weight"]
+        categorical_features = [f for f in categorical_features if f != "sample_weight"]
+
+    metric_sample_weight = None
     if predictions is not None:
         encoded_pred, pred_warnings = _encode_binary(predictions)
         warnings.extend(pred_warnings)
         y_pred = encoded_pred.to_numpy()
         y_true_values = y_true.to_numpy()
         sensitive_test = sensitive_values.astype(str).to_numpy()
+        if sample_weight is not None:
+            metric_sample_weight = sample_weight.to_numpy()
     else:
-        warnings.append("Proxy model was trained because no prediction column was provided.")
+        info_notes.append("Proxy model was trained because no prediction column was provided. To use direct predictions, add a prediction column when uploading.")
         model = _build_model(numeric_features, categorical_features)
 
-        x_train, x_test, y_train, y_test, sensitive_train, sensitive_test = train_test_split(
-            features,
-            y_true.to_numpy(),
-            sensitive_values.astype(str),
-            test_size=0.3,
-            random_state=42,
-            stratify=y_true,
-        )
+        if sample_weight is not None:
+            (
+                x_train,
+                x_test,
+                y_train,
+                y_test,
+                sensitive_train,
+                sensitive_test,
+                weight_train,
+                weight_test,
+            ) = train_test_split(
+                features_clean,
+                y_true.to_numpy(),
+                sensitive_values.astype(str),
+                sample_weight.to_numpy(),
+                test_size=0.3,
+                random_state=42,
+                stratify=y_true,
+            )
+            metric_sample_weight = weight_test
+        else:
+            x_train, x_test, y_train, y_test, sensitive_train, sensitive_test = train_test_split(
+                features_clean,
+                y_true.to_numpy(),
+                sensitive_values.astype(str),
+                test_size=0.3,
+                random_state=42,
+                stratify=y_true,
+            )
+            weight_train = None
 
-        model.fit(x_train, y_train)
+        if weight_train is not None:
+            model.fit(x_train, y_train, classifier__sample_weight=weight_train)
+        else:
+            model.fit(x_train, y_train)
+
         y_pred = model.predict(x_test)
         y_true_values = y_test
 
@@ -286,6 +371,7 @@ def compute_fairness(
             y_true=y_true_values,
             y_pred=y_pred,
             sensitive_features=sensitive_test,
+            sample_weight=metric_sample_weight,
         )
     )
     eo_diff = float(
@@ -293,23 +379,33 @@ def compute_fairness(
             y_true=y_true_values,
             y_pred=y_pred,
             sensitive_features=sensitive_test,
+            sample_weight=metric_sample_weight,
         )
     )
 
     bsi_score = _compute_bsi(dp_diff=dp_diff, eo_diff=eo_diff, sensitive_values=pd.Series(sensitive_test))
+
+    sample_params = None
+    if metric_sample_weight is not None:
+        sample_params = {"sample_weight": metric_sample_weight}
 
     group_accuracy = MetricFrame(
         metrics=accuracy_score,
         y_true=y_true_values,
         y_pred=y_pred,
         sensitive_features=sensitive_test,
+        sample_params=sample_params,
     )
 
     positive_prediction_rate = MetricFrame(
-        metrics=lambda yt, yp: float((yp == 1).mean()),
+        metrics=lambda yt, yp, sample_weight=None: float(
+            (yp == 1).mean() if sample_weight is None
+            else np.average(yp == 1, weights=sample_weight)
+        ),
         y_true=y_true_values,
         y_pred=y_pred,
         sensitive_features=sensitive_test,
+        sample_params=sample_params,
     )
 
     group_metrics: dict[str, dict[str, float]] = {}
@@ -330,6 +426,7 @@ def compute_fairness(
         group_metrics=group_metrics,
         audit_mode=audit_mode,
         warnings=warnings,
+        info_notes=info_notes,
         reliability_note=reliability_note,
         target_transformation=target_transformation,
     )

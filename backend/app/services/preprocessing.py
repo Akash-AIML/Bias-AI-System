@@ -207,7 +207,10 @@ def _fill_missing_values(df: pd.DataFrame) -> pd.DataFrame:
     filled_df = df.copy()
     for column in filled_df.columns:
         if pd.api.types.is_numeric_dtype(filled_df[column]):
-            filled_df[column] = filled_df[column].fillna(filled_df[column].median())
+            median_val = filled_df[column].median()
+            if pd.isna(median_val):
+                median_val = 0.0
+            filled_df[column] = filled_df[column].fillna(median_val)
         else:
             mode = filled_df[column].mode(dropna=True)
             fallback_value = mode.iloc[0] if not mode.empty else "unknown"

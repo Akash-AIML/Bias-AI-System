@@ -37,7 +37,12 @@ def simulate_mitigation(
     simulations = [SimulationResult(name="baseline", **baseline)]
 
     try:
-        reweighted = apply_group_reweighting(dataframe, sensitive_column=sensitive)
+        reweighted = apply_group_reweighting(
+            dataframe,
+            sensitive_column=sensitive,
+            target_column=target,
+            target_binarization_threshold=target_binarization_threshold,
+        )
         reweighted_result = _compute(
             reweighted,
             target,
