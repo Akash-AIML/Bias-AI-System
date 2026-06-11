@@ -1,12 +1,11 @@
 import os
-
 from dotenv import load_dotenv
+
+load_dotenv(override=True)  # Load environment variables before importing routes that initialize services
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-
 from app.routes.analyze import router as analyze_router
-
-load_dotenv()
 
 app = FastAPI(title="Bias AI System API", version="0.1.0")
 

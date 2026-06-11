@@ -229,6 +229,7 @@ def compute_fairness(
     categorical_features: list[str],
     threshold: float = 0.10,
     target_binarization_threshold: float | None = None,
+    weight_column: str | None = None,
 ) -> FairnessResult:
     if len(features) < 20:
         raise ValueError("Dataset is too small for fairness analysis. Provide at least 20 rows.")
@@ -257,8 +258,15 @@ def compute_fairness(
 
     # Check sensitive attribute imbalance
     group_counts = Counter(sensitive_values.astype(str))
-    for group_name, count in group_counts.items():
-        if count < 10:
+    small_groups = [(group_name, count) for group_name, count in group_counts.items() if count < 10]
+    if len(small_groups) > 3:
+        examples = ", ".join(f"'{name}' ({count} samples)" for name, count in small_groups[:3])
+        warnings.append(
+            f"{len(small_groups)} sensitive groups have fewer than 10 samples (including {examples}); "
+            "group-specific metrics for these cohorts may be less reliable."
+        )
+    else:
+        for group_name, count in small_groups:
             warnings.append(
                 f"Sensitive group '{group_name}' has only {count} samples; group-specific metrics may be less reliable."
             )
@@ -308,11 +316,24 @@ def compute_fairness(
 
     sample_weight = None
     features_clean = features.copy()
-    if "sample_weight" in features_clean.columns:
-        sample_weight = features_clean["sample_weight"]
-        features_clean = features_clean.drop(columns=["sample_weight"])
-        numeric_features = [f for f in numeric_features if f != "sample_weight"]
-        categorical_features = [f for f in categorical_features if f != "sample_weight"]
+
+    # Resolve the weight column: explicit name takes priority, then auto-detect
+    # a column literally named "sample_weight" as a convenience fallback.
+    resolved_weight_col: str | None = None
+    if weight_column and weight_column in features_clean.columns:
+        resolved_weight_col = weight_column
+    elif "sample_weight" in features_clean.columns:
+        resolved_weight_col = "sample_weight"
+
+    if resolved_weight_col:
+        sample_weight = features_clean[resolved_weight_col]
+        features_clean = features_clean.drop(columns=[resolved_weight_col])
+        numeric_features = [f for f in numeric_features if f != resolved_weight_col]
+        categorical_features = [f for f in categorical_features if f != resolved_weight_col]
+        info_notes.append(
+            f"Sample weights from column '{resolved_weight_col}' are applied to all "
+            "fairness metrics (demographic parity, equalized odds, group selection rates)."
+        )
 
     metric_sample_weight = None
     if predictions is not None:
