@@ -78,6 +78,7 @@ export function FileUpload() {
   const [target, setTarget] = useState("");
   const [sensitive, setSensitive] = useState("");
   const [predictionColumn, setPredictionColumn] = useState("");
+  const [weightColumn, setWeightColumn] = useState("");
   const [orgName, setOrgName] = useState("");
   const [datasetName, setDatasetName] = useState("");
   const [timeColumn, setTimeColumn] = useState("");
@@ -134,6 +135,7 @@ export function FileUpload() {
           setTarget(suggestions.target ?? "");
           setSensitive(suggestions.sensitive ?? "");
           setPredictionColumn(suggestions.prediction_column ?? "");
+            setWeightColumn((suggestions as any).weight_column ?? "");
           setTimeColumn(suggestions.time_column ?? "");
           setAutoMappingNote(
             suggestions.notes?.length
@@ -199,6 +201,7 @@ export function FileUpload() {
       payload.append("sensitive", sensitive);
       payload.append("query", query || "check bias");
       if (predictionColumn) payload.append("prediction_column", predictionColumn);
+      if (weightColumn) payload.append("weight_column", weightColumn);
       if (orgName.trim()) payload.append("org_name", orgName.trim());
       if (datasetName.trim()) payload.append("dataset_name", datasetName.trim());
       if (timeColumn) payload.append("time_column", timeColumn);
@@ -227,6 +230,7 @@ export function FileUpload() {
           target,
           sensitive,
           predictionColumn,
+          weightColumn,
           query,
           orgName,
           datasetName,
@@ -398,6 +402,13 @@ export function FileUpload() {
                   predictionColumn,
                   setPredictionColumn,
                   "Model predictions to audit real outputs. Leave blank for proxy audit."
+                )}
+                {renderColumnSelector(
+                  "Weight Column (Optional)",
+                  <Database size={16} />,
+                  weightColumn,
+                  setWeightColumn,
+                  "Optional sample weight column to apply per-row weights during analysis."
                 )}
                 {renderColumnSelector(
                   "Time Feature (Optional)",

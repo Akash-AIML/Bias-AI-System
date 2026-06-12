@@ -22,7 +22,7 @@ app.add_middleware(
 
 @app.get("/api/health")
 def health() -> dict:
-    return {"status": "ok"}
+    return {"status": "ok", "llm_configured": bool(os.getenv("LLM_API_KEY"))}
 
 
 app.include_router(analyze_router, prefix="/api")

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { PanelRightOpen } from "lucide-react";
 
@@ -22,12 +23,13 @@ import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ThemeToggle } from "@/components/ThemeToggle";
-import { getAnalysisFile } from "@/lib/analysis-cache";
+import { getAnalysisFile, clearAnalysisFile } from "@/lib/analysis-cache";
 import type { AnalyzeResponse } from "@/lib/types";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000/api";
 
 export default function ResultsPage() {
+  const router = useRouter();
   const [data, setData] = useState<AnalyzeResponse | null>(null);
   const [showDialog, setShowDialog] = useState(false);
   const [showSheet, setShowSheet] = useState(false);
@@ -236,6 +238,14 @@ export default function ResultsPage() {
                 <Link href="/" className="text-sm text-[var(--text-soft)] underline">
                   Run another analysis
                 </Link>
+                <Button variant="ghost" onClick={() => {
+                  localStorage.removeItem("analysisResult");
+                  localStorage.removeItem("analysisMeta");
+                  clearAnalysisFile();
+                  router.push("/");
+                }} size="sm">
+                  Clear Analysis
+                </Button>
               </div>
             </div>
 
