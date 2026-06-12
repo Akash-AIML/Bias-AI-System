@@ -13,6 +13,7 @@ import { Progress } from "@/components/ui/progress";
 import { Separator } from "@/components/ui/separator";
 import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { setAnalysisFile } from "@/lib/analysis-cache";
 import type { AnalyzeResponse } from "@/lib/types";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000/api";
@@ -26,6 +27,45 @@ type ColumnSuggestionResponse = {
   method: string;
   notes: string[];
 };
+
+function parseCsvHeader(line: string): string[] {
+  const columns: string[] = [];
+  let current = "";
+  let inQuotes = false;
+
+  for (let index = 0; index < line.length; index += 1) {
+    const character = line[index];
+    const nextCharacter = line[index + 1];
+
+    if (character === '"') {
+      if (inQuotes && nextCharacter === '"') {
+        current += '"';
+        index += 1;
+      } else {
+        inQuotes = !inQuotes;
+      }
+      continue;
+    }
+
+    if (character === "," && !inQuotes) {
+      const trimmed = current.trim();
+      if (trimmed) {
+        columns.push(trimmed);
+      }
+      current = "";
+      continue;
+    }
+
+    current += character;
+  }
+
+  const trimmed = current.trim();
+  if (trimmed) {
+    columns.push(trimmed);
+  }
+
+  return columns;
+}
 
 export function FileUpload() {
   const router = useRouter();
@@ -68,12 +108,9 @@ export function FileUpload() {
     setIsParsing(true);
     try {
       const text = await selectedFile.text();
-      localStorage.setItem("analysisFileContent", text);
+      setAnalysisFile(selectedFile);
       const firstLine = text.split("\n")[0] ?? "";
-      const parsedColumns = firstLine
-        .split(",")
-        .map((column) => column.trim().replaceAll('"', ""))
-        .filter(Boolean);
+      const parsedColumns = parseCsvHeader(firstLine);
 
       setColumns(parsedColumns);
       setTarget("");

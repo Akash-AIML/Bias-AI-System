@@ -22,6 +22,7 @@ import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ThemeToggle } from "@/components/ThemeToggle";
+import { getAnalysisFile } from "@/lib/analysis-cache";
 import type { AnalyzeResponse } from "@/lib/types";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000/api";
@@ -31,7 +32,7 @@ export default function ResultsPage() {
   const [showDialog, setShowDialog] = useState(false);
   const [showSheet, setShowSheet] = useState(false);
   const [analysisMeta, setAnalysisMeta] = useState<Record<string, string> | null>(null);
-  const [fileContent, setFileContent] = useState<string | null>(null);
+  const [analysisFile, setAnalysisFile] = useState<File | null>(null);
 
   useEffect(() => {
     const raw = localStorage.getItem("analysisResult");
@@ -47,10 +48,7 @@ export default function ResultsPage() {
       if (metaRaw) {
         setAnalysisMeta(JSON.parse(metaRaw));
       }
-      const fileRaw = localStorage.getItem("analysisFileContent");
-      if (fileRaw) {
-        setFileContent(fileRaw);
-      }
+      setAnalysisFile(getAnalysisFile());
     } catch {
       setData(null);
     }
@@ -116,17 +114,17 @@ export default function ResultsPage() {
   }
 
   async function downloadReweightedCsv() {
-    if (!fileContent || !analysisMeta) {
+    if (!analysisFile || !analysisMeta) {
       return;
     }
 
-    const blob = new Blob([fileContent], { type: "text/csv" });
-    const file = new File([blob], analysisMeta.filename ?? "dataset.csv", { type: "text/csv" });
-
     const payload = new FormData();
-    payload.append("file", file);
+    payload.append("file", analysisFile, analysisMeta.filename ?? analysisFile.name ?? "dataset.csv");
     payload.append("target", analysisMeta.target ?? "");
     payload.append("sensitive", analysisMeta.sensitive ?? "");
+    if (analysisMeta.targetBinarizationThreshold?.trim()) {
+      payload.append("target_binarization_threshold", analysisMeta.targetBinarizationThreshold.trim());
+    }
 
     const response = await fetch(`${API_BASE_URL}/reweighted-csv`, {
       method: "POST",
@@ -225,7 +223,7 @@ export default function ResultsPage() {
                 <Button onClick={() => setShowDialog(true)} size="lg">
                   Explain
                 </Button>
-                <Button variant="outline" onClick={downloadReweightedCsv} size="lg">
+                <Button variant="outline" onClick={downloadReweightedCsv} size="lg" disabled={!analysisFile}>
                   Download reweighted CSV
                 </Button>
                 <Button variant="outline" onClick={downloadReport} size="lg">
@@ -312,7 +310,7 @@ export default function ResultsPage() {
 
             <BiasChart dpDiff={data.dp_diff} eoDiff={data.eo_diff} />
             <GroupMetricsChart metrics={data.group_metrics} />
-            <SimulationPanel metrics={data.group_metrics} />
+            <SimulationPanel simulations={data.mitigation_simulations ?? []} />
 
             <Card>
               <CardHeader>

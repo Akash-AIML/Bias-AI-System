@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import asdict, is_dataclass
 from io import BytesIO
 import uuid
 import time
@@ -37,6 +38,12 @@ def _is_supported_csv_upload(file: UploadFile) -> bool:
         return True
     filename = (file.filename or "").lower()
     return filename.endswith(".csv")
+
+
+def _serialize_value(value: Any) -> Any:
+    if is_dataclass(value):
+        return asdict(value)
+    return value
 
 
 class AnalyzeResponse(BaseModel):
@@ -244,6 +251,7 @@ async def analyze_dataset(
         numeric_features=temporal_numeric_features,
         categorical_features=temporal_categorical_features,
         target_binarization_threshold=target_binarization_threshold,
+        weight_column=weight_column,
     )
     print(f"[SERVICES] Completed analyze_temporal_drift in {time.time() - t_temp:.3f}s")
 
@@ -255,14 +263,14 @@ async def analyze_dataset(
             text_columns=preprocessed.text_columns,
             sensitive_values=preprocessed.sensitive_values,
         )
-    except Exception:
+    except (ImportError, ModuleNotFoundError, OSError, RuntimeError, ValueError) as error:
         text_bias = analyze_text_bias(
             dataframe=preprocessed.dataframe,
             text_columns=[],
             sensitive_values=preprocessed.sensitive_values,
         )
         fairness_result.warnings.append(
-            "Text bias analysis failed; language findings are unavailable for this dataset."
+            f"Text bias analysis failed ({type(error).__name__}); language findings are unavailable for this dataset."
         )
     print(f"[SERVICES] Completed analyze_text_bias in {time.time() - t_text_bias:.3f}s")
 
@@ -281,9 +289,9 @@ async def analyze_dataset(
         bsi_score=fairness_result.bsi_score,
         bias_detected=fairness_result.bias,
         group_metrics=fairness_result.group_metrics,
-        proxy_features=[proxy.__dict__ for proxy in proxy_features],
-        temporal_drift=temporal_drift.__dict__,
-        text_bias=text_bias.__dict__,
+        proxy_features=[_serialize_value(proxy) for proxy in proxy_features],
+        temporal_drift=_serialize_value(temporal_drift),
+        text_bias=_serialize_value(text_bias),
         raw_warnings=fairness_result.warnings,
         raw_info_notes=fairness_result.info_notes,
         audit_mode=fairness_result.audit_mode,
@@ -291,7 +299,7 @@ async def analyze_dataset(
         weight_column=weight_column,
         reliability_note=fairness_result.reliability_note,
         target_transformation=fairness_result.target_transformation,
-        risk_tier=risk_tier.__dict__,
+        risk_tier=_serialize_value(risk_tier),
     )
     print(f"[SERVICES] Completed llm_service.generate_combined_audit_report in {time.time() - t_llm:.3f}s")
 
@@ -325,6 +333,7 @@ async def analyze_dataset(
         numeric_features=temporal_numeric_features,
         categorical_features=temporal_categorical_features,
         target_binarization_threshold=target_binarization_threshold,
+        weight_column=weight_column,
     )
     print(f"[SERVICES] Completed simulate_mitigation in {time.time() - t_sim:.3f}s")
 
@@ -341,13 +350,13 @@ async def analyze_dataset(
         "warnings": fairness_result.warnings,
         "target_transformation": fairness_result.target_transformation,
         "reliability_note": fairness_result.reliability_note,
-        "risk_tier": risk_tier.__dict__,
-        "proxy_features": [proxy.__dict__ for proxy in proxy_features],
-        "temporal_drift": temporal_drift.__dict__,
-        "text_bias": text_bias.__dict__,
+        "risk_tier": _serialize_value(risk_tier),
+        "proxy_features": [_serialize_value(proxy) for proxy in proxy_features],
+        "temporal_drift": _serialize_value(temporal_drift),
+        "text_bias": _serialize_value(text_bias),
         "legal_context": legal_context,
         "audit_narrative": audit_narrative,
-        "mitigation_simulation": [simulation.__dict__ for simulation in simulations],
+        "mitigation_simulation": [_serialize_value(simulation) for simulation in simulations],
     }
 
     return AnalyzeResponse(
@@ -356,10 +365,10 @@ async def analyze_dataset(
         dp_diff=fairness_result.dp_diff,
         eo_diff=fairness_result.eo_diff,
         bsi_score=fairness_result.bsi_score,
-        risk_tier=risk_tier.__dict__,
-        proxy_features=[proxy.__dict__ for proxy in proxy_features],
-        temporal_drift=temporal_drift.__dict__,
-        text_bias=text_bias.__dict__,
+        risk_tier=_serialize_value(risk_tier),
+        proxy_features=[_serialize_value(proxy) for proxy in proxy_features],
+        temporal_drift=_serialize_value(temporal_drift),
+        text_bias=_serialize_value(text_bias),
         legal_context=legal_context,
         audit_narrative={
             **audit_narrative,
@@ -378,7 +387,7 @@ async def analyze_dataset(
         weight_column=weight_column,
         target_transformation=fairness_result.target_transformation,
         audit_report=audit_report,
-        mitigation_simulations=[simulation.__dict__ for simulation in simulations],
+        mitigation_simulations=[_serialize_value(simulation) for simulation in simulations],
     )
 
 
@@ -543,7 +552,7 @@ async def intersectional_analysis(
         bsi_score=fairness_result.bsi_score,
         bias_detected=fairness_result.bias,
         group_metrics=fairness_result.group_metrics,
-        proxy_features=[proxy.__dict__ for proxy in proxy_features],
+        proxy_features=[_serialize_value(proxy) for proxy in proxy_features],
         temporal_drift=temporal_drift,
         text_bias=text_bias,
         raw_warnings=fairness_result.warnings,
@@ -553,7 +562,7 @@ async def intersectional_analysis(
         weight_column=weight_column,
         reliability_note=fairness_result.reliability_note,
         target_transformation=fairness_result.target_transformation,
-        risk_tier=risk_tier.__dict__,
+        risk_tier=_serialize_value(risk_tier),
     )
     print(f"[SERVICES] Completed llm_service.generate_combined_audit_report in {time.time() - t_llm:.3f}s")
 
@@ -583,8 +592,8 @@ async def intersectional_analysis(
         "warnings": fairness_result.warnings,
         "target_transformation": fairness_result.target_transformation,
         "reliability_note": fairness_result.reliability_note,
-        "risk_tier": risk_tier.__dict__,
-        "proxy_features": [proxy.__dict__ for proxy in proxy_features],
+        "risk_tier": _serialize_value(risk_tier),
+        "proxy_features": [_serialize_value(proxy) for proxy in proxy_features],
         "temporal_drift": temporal_drift,
         "text_bias": text_bias,
         "legal_context": legal_context,
@@ -597,8 +606,8 @@ async def intersectional_analysis(
         dp_diff=fairness_result.dp_diff,
         eo_diff=fairness_result.eo_diff,
         bsi_score=fairness_result.bsi_score,
-        risk_tier=risk_tier.__dict__,
-        proxy_features=[proxy.__dict__ for proxy in proxy_features],
+        risk_tier=_serialize_value(risk_tier),
+        proxy_features=[_serialize_value(proxy) for proxy in proxy_features],
         temporal_drift=temporal_drift,
         text_bias=text_bias,
         legal_context=legal_context,

@@ -1,33 +1,22 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 
-import type { GroupMetric } from "@/lib/types";
+import type { MitigationSimulation } from "@/lib/types";
 import { ScrollArea } from "./ui/scroll-area";
 
 type SimulationPanelProps = {
-  metrics: Record<string, GroupMetric>;
+  simulations: MitigationSimulation[];
 };
 
-export function SimulationPanel({ metrics }: SimulationPanelProps) {
-  const entries = Object.entries(metrics);
-  const selectionRates = entries.map(([, values]) => values.selection_rate);
-  const mean = selectionRates.reduce((sum, value) => sum + value, 0) / (selectionRates.length || 1);
-
-  const rows = entries.map(([group, values]) => {
-    const projected = values.selection_rate - (values.selection_rate - mean) * 0.5;
-    return {
-      group,
-      current: values.selection_rate,
-      projected,
-    };
-  });
+export function SimulationPanel({ simulations }: SimulationPanelProps) {
+  const rows = simulations;
 
   return (
     <Card className="animate-fade-rise">
       <CardHeader>
         <CardTitle>Before/After Simulation</CardTitle>
         <p className="text-sm text-[var(--text-soft)]">
-          Simulates a 50% reduction in demographic parity gap by moving selection rates toward the mean.
+          Uses the backend mitigation simulation results for the current audit.
         </p>
       </CardHeader>
       <CardContent>
@@ -35,17 +24,19 @@ export function SimulationPanel({ metrics }: SimulationPanelProps) {
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>Group</TableHead>
-              <TableHead>Current Rate</TableHead>
-              <TableHead>Projected Rate</TableHead>
+              <TableHead>Method</TableHead>
+              <TableHead>BSI</TableHead>
+              <TableHead>DP Diff</TableHead>
+              <TableHead>EO Diff</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {rows.map((row) => (
-              <TableRow key={row.group}>
-                <TableCell>{row.group}</TableCell>
-                <TableCell>{row.current.toFixed(3)}</TableCell>
-                <TableCell>{row.projected.toFixed(3)}</TableCell>
+              <TableRow key={row.name}>
+                <TableCell>{row.name}</TableCell>
+                <TableCell>{row.bsi_score.toFixed(2)}</TableCell>
+                <TableCell>{row.dp_diff.toFixed(4)}</TableCell>
+                <TableCell>{row.eo_diff.toFixed(4)}</TableCell>
               </TableRow>
             ))}
           </TableBody>

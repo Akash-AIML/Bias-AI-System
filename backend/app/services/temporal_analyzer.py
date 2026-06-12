@@ -26,6 +26,7 @@ def analyze_temporal_drift(
     numeric_features: list[str],
     categorical_features: list[str],
     target_binarization_threshold: float | None = None,
+    weight_column: str | None = None,
 ) -> TemporalDriftResult:
     if not time_column or time_column not in dataframe.columns:
         return TemporalDriftResult(
@@ -92,6 +93,7 @@ def analyze_temporal_drift(
             numeric_features=numeric_features,
             categorical_features=categorical_features,
             target_binarization_threshold=target_binarization_threshold,
+            weight_column=weight_column,
         )
         late_result = compute_fairness(
             features=late_payload["features"],
@@ -101,6 +103,7 @@ def analyze_temporal_drift(
             numeric_features=numeric_features,
             categorical_features=categorical_features,
             target_binarization_threshold=target_binarization_threshold,
+            weight_column=weight_column,
         )
     except ValueError:
         return TemporalDriftResult(

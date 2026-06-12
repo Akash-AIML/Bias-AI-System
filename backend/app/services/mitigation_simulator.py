@@ -24,6 +24,7 @@ def simulate_mitigation(
     numeric_features: list[str],
     categorical_features: list[str],
     target_binarization_threshold: float | None = None,
+    weight_column: str | None = None,
 ) -> list[SimulationResult]:
     baseline = _compute(
         dataframe,
@@ -33,6 +34,7 @@ def simulate_mitigation(
         numeric_features,
         categorical_features,
         target_binarization_threshold,
+        weight_column,
     )
     simulations = [SimulationResult(name="baseline", **baseline)]
 
@@ -51,6 +53,7 @@ def simulate_mitigation(
             numeric_features,
             categorical_features,
             target_binarization_threshold,
+            weight_column,
         )
         simulations.append(SimulationResult(name="reweighting", **reweighted_result))
     except Exception:
@@ -67,6 +70,7 @@ def _compute(
     numeric_features: list[str],
     categorical_features: list[str],
     target_binarization_threshold: float | None = None,
+    weight_column: str | None = None,
 ) -> dict[str, float]:
     labels = dataframe[target]
     sensitive_values = dataframe[sensitive].astype(str)
@@ -83,6 +87,7 @@ def _compute(
         numeric_features=numeric_features,
         categorical_features=categorical_features,
         target_binarization_threshold=target_binarization_threshold,
+        weight_column=weight_column,
     )
     return {
         "bsi_score": result.bsi_score,

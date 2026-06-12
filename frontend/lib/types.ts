@@ -9,11 +9,26 @@ export type AuditReport = {
   metrics: {
     dp_diff: number;
     eo_diff: number;
+    bsi_score?: number;
   };
   group_metrics: Record<string, GroupMetric>;
   warnings: string[];
   target_transformation: TargetTransformation;
   reliability_note: string;
+  risk_tier?: RiskTier;
+  proxy_features?: ProxyFeature[];
+  temporal_drift?: TemporalDrift;
+  text_bias?: TextBias;
+  legal_context?: LegalContext;
+  audit_narrative?: AuditNarrative;
+  mitigation_simulation?: MitigationSimulation[];
+};
+
+export type MitigationSimulation = {
+  name: string;
+  bsi_score: number;
+  dp_diff: number;
+  eo_diff: number;
 };
 
 export type TargetTransformation = {
@@ -100,6 +115,9 @@ export type AnalyzeResponse = {
   domain: string;
   audit_mode: string;
   warnings: string[];
+  info_notes: string[];
+  weight_column: string | null;
   target_transformation: TargetTransformation;
   audit_report: AuditReport;
+  mitigation_simulations: MitigationSimulation[];
 };
