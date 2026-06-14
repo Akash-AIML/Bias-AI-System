@@ -68,7 +68,7 @@ Multipart form fields:
 - `sensitive`: sensitive attribute column name
 - `query`: optional audit goal text
 - `prediction_column`: optional prediction column name
-- `org_name`: optional organization name
+- `org_name`: optional name
 - `dataset_name`: optional dataset name
 - `time_column`: optional time column name
 - `text_columns`: optional comma-separated text column names

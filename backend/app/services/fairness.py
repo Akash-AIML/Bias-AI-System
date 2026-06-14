@@ -246,7 +246,6 @@ def _encode_binary(series: pd.Series) -> tuple[pd.Series, list[str]]:
         raise ValueError("Prediction column must be binary for fairness analysis.")
     return encoded, warnings
 
-
 def _build_model(numeric_features: list[str], categorical_features: list[str]) -> Pipeline:
     """Build a logistic regression pipeline.
 

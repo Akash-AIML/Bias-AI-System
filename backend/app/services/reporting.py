@@ -11,11 +11,11 @@ from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, Tabl
 
 def build_fairness_report(payload: dict[str, Any]) -> bytes:
     buffer = BytesIO()
-    doc = SimpleDocTemplate(buffer, pagesize=LETTER, title="Algorithmic Accountability Certificate")
+    doc = SimpleDocTemplate(buffer, pagesize=LETTER, title="Algorithmic Fairness Audit")
     styles = getSampleStyleSheet()
 
     elements: list[Any] = []
-    elements.append(Paragraph("Algorithmic Accountability Certificate", styles["Title"]))
+    elements.append(Paragraph("Algorithmic Fairness Audit", styles["Title"]))
     elements.append(Spacer(1, 12))
 
     dataset = payload.get("dataset_summary", {})
