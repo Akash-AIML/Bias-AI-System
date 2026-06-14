@@ -337,9 +337,9 @@ export function FileUpload() {
         <div className="relative min-h-[400px]">
           {/* STEP 1: UPLOAD */}
           {step === 1 && (
-            <div className="animate-fade-in absolute inset-0">
+            <div className="animate-fade-in w-full">
               <div
-                className={`flex h-full flex-col items-center justify-center rounded-xl border-2 border-dashed transition-all duration-200 ${isHovering ? "border-slate-400 bg-slate-50 dark:border-slate-500 dark:bg-slate-900/50" : "border-slate-200 bg-white/50 dark:border-slate-800 dark:bg-black/20"
+                className={`flex min-h-[400px] flex-col items-center justify-center rounded-xl border-2 border-dashed transition-all duration-200 ${isHovering ? "border-slate-400 bg-slate-50 dark:border-slate-500 dark:bg-slate-900/50" : "border-slate-200 bg-white/50 dark:border-slate-800 dark:bg-black/20"
                   }`}
                 onDragOver={(e) => { e.preventDefault(); setIsHovering(true); }}
                 onDragLeave={() => setIsHovering(false)}
@@ -377,7 +377,7 @@ export function FileUpload() {
 
           {/* STEP 2: MAP DATA */}
           {step === 2 && (
-            <div className="animate-fade-in absolute inset-0 space-y-6">
+            <div className="animate-fade-in space-y-6 w-full">
               <div className="flex items-center justify-between rounded-lg border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-950">
                 <div className="flex items-center gap-4">
                   <div className="flex h-10 w-10 items-center justify-center rounded-full bg-emerald-100 text-emerald-600 dark:bg-emerald-900/30 dark:text-emerald-400">
@@ -439,7 +439,7 @@ export function FileUpload() {
 
           {/* STEP 3: CONFIGURE & RUN */}
           {step === 3 && (
-            <div className="animate-fade-in absolute inset-0 rounded-xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-950 pb-20 overflow-y-auto">
+            <div className="animate-fade-in rounded-xl border border-slate-200 bg-white p-6 shadow-sm dark:border-slate-800 dark:bg-slate-950 w-full">
               <h2 className="mb-6 text-xl font-semibold tracking-tight text-[var(--text)]">Finalize Audit Parameters</h2>
 
               <div className="space-y-6">
