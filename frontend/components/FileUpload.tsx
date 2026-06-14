@@ -445,7 +445,7 @@ export function FileUpload() {
               <div className="space-y-6">
                 <div className="grid gap-6 sm:grid-cols-2">
                   <div className="space-y-2">
-                    <label className="text-sm font-medium text-[var(--text)]">Organization Name</label>
+                    <label className="text-sm font-medium text-[var(--text)]">Name</label>
                     <Input value={orgName} onChange={(e) => setOrgName(e.target.value)} placeholder="Acme Corp" className="h-11" />
                   </div>
                   <div className="space-y-2">

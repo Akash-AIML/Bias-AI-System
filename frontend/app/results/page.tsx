@@ -312,7 +312,7 @@ export default function ResultsPage() {
                 <Badge variant="secondary">Audit ID {data.audit_id}</Badge>
                 <Badge variant="secondary">{auditModeLabel}</Badge>
               </div>
-              <div className="flex flex-wrap items-center gap-3">
+              <div className="flex flex-wrap items-center gap-4">
                 <Button onClick={() => setShowDialog(true)} size="lg">
                   Explain
                 </Button>
@@ -320,7 +320,7 @@ export default function ResultsPage() {
                   Download reweighted CSV
                 </Button>
                 <Button variant="outline" onClick={downloadReport} size="lg">
-                  Download certificate
+                  Download Report
                 </Button>
                 <Button variant="outline" onClick={() => setShowSheet(true)} size="lg">
                   <PanelRightOpen size={16} className="mr-1" />
@@ -650,7 +650,7 @@ export default function ResultsPage() {
                 <span className="font-medium">Predictions:</span> {analysisMeta?.predictionColumn ?? "Proxy audit"}
               </div>
               <div>
-                <span className="font-medium">Organization:</span> {analysisMeta?.orgName ?? "Not set"}
+                <span className="font-medium">Name:</span> {analysisMeta?.orgName ?? "Not set"}
               </div>
               <div>
                 <span className="font-medium">Dataset:</span> {analysisMeta?.datasetName ?? "Not set"}
