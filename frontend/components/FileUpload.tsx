@@ -455,26 +455,6 @@ export function FileUpload() {
                 </div>
 
                 <div className="space-y-2">
-                  <label className="text-sm font-medium text-[var(--text)]">Text Columns (Optional)</label>
-                  <Input value={textColumns} onChange={(e) => setTextColumns(e.target.value)} placeholder="job_description, interview_notes" className="h-11" />
-                  <p className="text-xs text-[var(--text-soft)]">Comma-separated columns containing free-form text for textual bias embeddings.</p>
-                </div>
-
-                <div className="space-y-2">
-                  <label className="text-sm font-medium text-[var(--text)]">Target Threshold (Optional)</label>
-                  <Input
-                    value={targetBinarizationThreshold}
-                    onChange={(e) => setTargetBinarizationThreshold(e.target.value)}
-                    placeholder="Auto median when empty"
-                    className="h-11"
-                    inputMode="decimal"
-                  />
-                  <p className="text-xs text-[var(--text-soft)]">
-                    Used only for continuous numeric targets. If blank, median is used.
-                  </p>
-                </div>
-
-                <div className="space-y-2">
                   <label className="text-sm font-medium text-[var(--text)]">Audit Goal / Context Query</label>
                   <Textarea
                     value={query}
