@@ -797,77 +797,200 @@ class LLMService:
             prompt_groups = group_metrics
             group_note = ""
 
-        # Build group context lines
-        group_lines = ", ".join(
-            f"{g}: selection_rate={round(m.get('selection_rate', 0)*100, 1)}%"
-            for g, m in prompt_groups.items()
-        ) + group_note
+        # ── Rich group table for prompt ──────────────────────────────────────
+        group_rows = []
+        for g, m in prompt_groups.items():
+            row = (
+                f"  {g}: selection={round(m.get('selection_rate',0)*100,1)}%, "
+                f"accuracy={round(m.get('accuracy',0)*100,1)}%"
+            )
+            if 'fpr' in m:
+                row += f", FPR={round(m['fpr']*100,1)}%, FNR={round(m.get('fnr',0)*100,1)}%"
+            group_rows.append(row)
+        group_table = "\n".join(group_rows) + group_note
 
-        # proxy features list
-        proxy_str = ", ".join(str(p.get("feature", "")) for p in proxy_features[:3]) if proxy_features else "none"
+        # ── Proxy variable table with direction and strength ─────────────────
+        proxy_rows = []
+        for p in proxy_features[:8]:
+            corr = p.get('correlation', 0)
+            strength = "strong" if corr > 0.5 else "moderate" if corr > 0.25 else "weak"
+            proxy_rows.append(
+                f"  [{strength}] {p.get('feature','?')} — correlation={corr:.3f} ({p.get('direction','?')})"
+            )
+        proxy_table = "\n".join(proxy_rows) if proxy_rows else "  none identified"
+
+        # ── BSI interpretation band ──────────────────────────────────────────
+        if bsi_score < 20:
+            bsi_band = "LOW (0-20): model is largely fair, minor monitoring sufficient"
+        elif bsi_score < 40:
+            bsi_band = "MODERATE (20-40): notable disparity, review and improve data pipeline"
+        elif bsi_score < 65:
+            bsi_band = "HIGH (40-65): significant bias present, mitigation required before deployment"
+        else:
+            bsi_band = "CRITICAL (65-100): severe bias, immediate halt and remediation required"
+
+        # ── Temporal drift summary ───────────────────────────────────────────
+        drift_status = temporal_drift.get('status', 'not_available') if isinstance(temporal_drift, dict) else 'not_available'
+        drift_detail = ""
+        if isinstance(temporal_drift, dict) and temporal_drift.get('early_bsi') is not None:
+            drift_detail = (
+                f" Early BSI={temporal_drift.get('early_bsi')}, "
+                f"Late BSI={temporal_drift.get('late_bsi')}, "
+                f"Delta={temporal_drift.get('delta')}"
+            )
+
+        # ── Text bias summary ────────────────────────────────────────────────
+        text_bias_summary = ""
+        if isinstance(text_bias, dict) and text_bias.get('has_text_columns'):
+            gaps = text_bias.get('sentiment_gaps', [])
+            if gaps:
+                g0 = gaps[0]
+                text_bias_summary = (
+                    f"Sentiment gap between '{g0.get('group_a')}' and '{g0.get('group_b')}': "
+                    f"{round(g0.get('gap',0),3)} in column '{g0.get('column')}'"
+                )
 
         prompt = (
-            "You are an AI fairness auditor and compliance assistant. Your task is to perform a comprehensive "
-            "fairness audit and intent analysis on a dataset based on a user query and computed fairness metrics, "
-            "and return a single structured JSON response.\n\n"
-            "--- CONTEXT ---\n"
-            f"User Query: {query}\n"
-            f"Dataset Context: {json.dumps(dataset_context)}\n"
-            f"Audit Mode: {audit_mode} ({'no prediction column provided' if audit_mode == 'proxy' else 'real predictions used'})\n"
-            f"Dataset Rows: {dataset_rows}\n"
-            + (f"Weight Column Applied: {weight_column}\n" if weight_column else "")
-            + f"Demographic Parity Gap: {round(abs(dp_diff)*100, 1)}%\n"
-            f"Equalized Odds Gap: {round(abs(eo_diff)*100, 1)}%\n"
-            f"Bias Severity Index (BSI): {bsi_score}/100\n"
-            f"Bias Detected: {bias_detected}\n"
-            f"Group Metrics: {json.dumps(prompt_groups)}\n"
-            f"Group selection rates: {group_lines}\n"
-            f"Proxy Features Driving Bias: {proxy_str}\n"
-            f"Temporal Drift: {json.dumps(temporal_drift)}\n"
-            f"Text Bias: {json.dumps(text_bias)}\n"
-            f"Raw Warnings: {json.dumps(raw_warnings)}\n"
-            f"Raw Info Notes: {json.dumps(raw_info_notes)}\n"
-            f"Reliability Note: {reliability_note}\n"
-            f"Target Transformation: {json.dumps(target_transformation or {})}\n"
-            + (f"Risk Tier: {json.dumps(risk_tier)}\n" if risk_tier else "")
-            
-            + "\n--- INSTRUCTIONS ---\n"
-            "Return a single, valid JSON object with the following structure and guidelines. "
-            "KEEP ALL RESPONSES CONCISE to minimize token usage.\n"
-            "1. 'intent': 'bias_detection' or 'mitigation'.\n"
-            "2. 'domain': Classified domain ('hiring', 'credit', 'housing', 'healthcare', or 'general').\n"
-            "3. 'legal_context': Object containing 'domain' (same as above), 'framework' (e.g. EEOC/Title VII (4/5ths rule), FCRA, FHA, ACA, etc.), and 'notes' (legal implications for this audit).\n"
-            "4. 'warnings': Rewrite each raw warning dynamically for a business executive (no technical jargon, mention specific groups/numbers). Do NOT copy the raw input verbatim. Preserve EXACT count of input raw_warnings.\n"
-            "5. 'info_notes': Rewrite each raw info note dynamically. Do NOT copy the raw input verbatim. Preserve EXACT count of input raw_notes.\n"
-            "6. 'suggestions': Exactly 4 actionable mitigation recommendations. Must name specific groups, numbers, or features from context. No generic templates (e.g. adjust decision thresholds, apply reweighting). If no bias is detected, return 1-2 dynamic recommendations on how to maintain fairness, monitor specific features, or improve data collection, specifically mentioning the domain and dataset.\n"
-            "7. 'explanation': Concise explanation of parity gaps and BSI for non-technical users in plain language.\n"
-            "8. 'summary': Verdict summary. Do not claim disadvantage if both parity gaps are near zero.\n"
-            "9. 'report_text': Concise summary suitable for a final compliance report.\n"
-            "10. 'counterfactuals': List of counterfactual statements for disadvantaged groups based on selection rates. Make it conversational and dynamic. If there is no gap, state dynamically that outcomes are equitable across groups.\n"
-            "11. 'audit_narrative': Object with:\n"
-            "    - 'executive_summary': 2-3 sentences overview of the audit findings.\n"
-            "    - 'findings': List of bullet points detailing top proxy features, drift, text bias, etc.\n"
-            "    - 'risk_assessment': Short assessment of the risk tier.\n"
-            "    - 'legal_exposure': Summary of legal risks.\n"
-            "    - 'recommended_actions': List of actions based on suggestions.\n\n"
-            "--- CRITICAL JSON COMPLIANCE RULES ---\n"
-            "1. Do NOT use double quotes inside string fields under any circumstances. If quoting is needed inside string fields, use single quotes (e.g. 'male|25'). Any unescaped double quotes within JSON values will cause a JSON parsing failure.\n"
-            "2. All string values must be properly escaped JSON strings.\n"
-            "3. Keep all text fields EXTREMELY short (1-2 sentences max) to ensure the response fits within the strict API token limits.\n"
-            "4. Return ONLY valid JSON matching the schema.\n\n"
-            "--- STRICT OUTPUT SCHEMA ---\n"
-            "Your output must be ONLY a valid JSON object matching this structure (do not include any additional keys, or markdown fences except the JSON itself):\n"
+            "You are a senior AI fairness auditor and legal compliance specialist with deep expertise in "
+            "algorithmic bias detection, EU AI Act, EEOC Title VII, FCRA, FHA, and ACA frameworks. "
+            "Analyse the computed fairness metrics below and produce a precise, evidence-based audit report.\n\n"
+
+            "═══════════════════ DATASET FACTS ═══════════════════\n"
+            f"Query            : {query}\n"
+            f"Domain Context   : {json.dumps(dataset_context.get('column_names', []))}\n"
+            f"Total Rows       : {dataset_rows:,}\n"
+            f"Audit Mode       : {audit_mode} "
+            f"({'no predictions — proxy logistic regression trained' if audit_mode == 'proxy' else 'real model predictions audited'})\n"
+            + (f"Sample Weights   : column '{weight_column}' applied\n" if weight_column else "")
+            + f"Target Encoding  : {json.dumps(target_transformation or {})}\n"
+            f"Reliability      : {reliability_note}\n\n"
+
+            "═══════════════════ FAIRNESS METRICS ═══════════════════\n"
+            f"Demographic Parity Gap  : {round(abs(dp_diff)*100, 2)}%  "
+            f"({'EXCEEDS' if abs(dp_diff) > 0.10 else 'within'} the 10% warning threshold)\n"
+            f"Equalized Odds Gap      : {round(abs(eo_diff)*100, 2)}%  "
+            f"({'EXCEEDS' if abs(eo_diff) > 0.10 else 'within'} the 10% warning threshold)\n"
+            f"Bias Severity Index     : {bsi_score}/100  →  {bsi_band}\n"
+            f"Bias Flag               : {'YES — bias is present' if bias_detected else 'NO — no significant bias detected'}\n\n"
+
+            "═══════════════════ GROUP BREAKDOWN ═══════════════════\n"
+            f"{group_table}\n\n"
+
+            "═══════════════════ PROXY VARIABLE ANALYSIS ═══════════════════\n"
+            "These features are statistically correlated with the sensitive attribute and may be "
+            "transmitting discrimination indirectly (even without being a protected attribute themselves):\n"
+            f"{proxy_table}\n\n"
+
+            "═══════════════════ TEMPORAL DRIFT ═══════════════════\n"
+            f"Status: {drift_status}{drift_detail}\n\n"
+
+            + (f"═══════════════════ TEXT BIAS ═══════════════════\n{text_bias_summary}\n\n" if text_bias_summary else "")
+
+            + "═══════════════════ DATA QUALITY WARNINGS ═══════════════════\n"
+            f"{json.dumps(raw_warnings)}\n\n"
+            f"Info Notes: {json.dumps(raw_info_notes)}\n\n"
+
+            + (f"Risk Tier: {json.dumps(risk_tier)}\n\n" if risk_tier else "")
+
+            + "═══════════════════ YOUR TASK ═══════════════════\n"
+            "Return ONE valid JSON object with ALL of the following fields. Be precise and reference the "
+            "actual numbers, group names, and feature names from the context above — never be generic.\n\n"
+
+            "FIELD DEFINITIONS:\n"
+            "1. 'intent' — string: 'bias_detection' or 'mitigation' based on user query.\n"
+
+            "2. 'domain' — string: one of 'hiring', 'credit', 'housing', 'healthcare', 'general'. "
+            "Infer from column names and query.\n"
+
+            "3. 'legal_context' — object: { domain, framework (cite the specific law/rule that applies), "
+            "notes (1 sentence on legal risk) }.\n"
+
+            "4. 'bias_types' — list of strings: Identify every type of bias present from this taxonomy — "
+            "use ONLY these labels and only include those that actually apply:\n"
+            "   - 'Selection Bias' (certain groups systematically excluded)\n"
+            "   - 'Historical Bias' (training data reflects past discrimination)\n"
+            "   - 'Proxy Discrimination' (neutral feature transmits protected-class disadvantage)\n"
+            "   - 'Measurement Bias' (features measured differently across groups)\n"
+            "   - 'Label Bias' (ground-truth labels themselves reflect human prejudice)\n"
+            "   - 'Representation Bias' (severe group size imbalance in training data)\n"
+            "   - 'Algorithmic Amplification' (model amplifies existing small gaps)\n"
+            "   - 'Temporal Drift Bias' (bias has worsened over time)\n"
+            "   - 'Text/Language Bias' (sentiment or terminology differs by group)\n"
+            "   If no bias is detected, return an empty list [].\n"
+
+            "5. 'proxy_analysis' — list of objects, one per proxy feature (up to 8): "
+            "{ feature, correlation, direction, strength ('strong'/'moderate'/'weak'), "
+            "why_it_matters (1 sentence), how_to_fix (1 specific action) }.\n"
+
+            "6. 'bsi_interpretation' — object: { score, band, meaning (1 plain-English sentence "
+            "explaining what BSI={bsi_score} means for this specific dataset), "
+            "trend (if temporal drift available, state whether BSI is worsening or stable) }.\n"
+
+            "7. 'warnings' — list of strings: Rewrite each raw_warning for a business executive. "
+            "No jargon. Name specific groups and numbers. EXACT same count as raw_warnings.\n"
+
+            "8. 'info_notes' — list of strings: Rewrite each raw info note. EXACT same count as raw_info_notes.\n"
+
+            "9. 'explanation' — string: 3-4 sentence plain-English explanation covering: "
+            "(a) what bias was found and which groups are affected, "
+            "(b) what the BSI score means in context, "
+            "(c) which proxy features are the main drivers, "
+            "(d) what this means for real people impacted by this system.\n"
+
+            "10. 'summary' — string: One sentence verdict. Do NOT claim disadvantage if both parity gaps < 1%.\n"
+
+            "11. 'report_text' — string: 2-3 sentence compliance-grade summary for a legal/audit report.\n"
+
+            "12. 'counterfactuals' — list of strings: For each disadvantaged group, write a specific "
+            "counterfactual sentence: 'A person in group X with similar qualifications to someone in group Y "
+            "is [N]% less/more likely to receive [outcome].' If no gap, confirm equity.\n"
+
+            "13. 'rectification_plan' — list of objects, exactly 4 steps in priority order: "
+            "{ priority (1-4), action (short title), description (1-2 sentences — cite specific features "
+            "or groups), expected_impact ('Reduces DP gap by ~X%' or similar), timeline ('Immediate', "
+            "'1-3 months', '3-6 months', '6-12 months') }.\n"
+            "Steps MUST address: proxy feature removal/adjustment, data rebalancing, "
+            "model retraining with fairness constraints, and ongoing monitoring.\n"
+
+            "14. 'suggestions' — list of strings: The 4 actions from rectification_plan as plain sentences. "
+            "Must name specific groups/features from context. No generic templates.\n"
+
+            "15. 'audit_narrative' — object:\n"
+            "    - 'executive_summary': 2-3 sentence overview for C-suite, naming the domain, BSI, and worst-affected group.\n"
+            "    - 'findings': List of bullet strings — one per key finding (proxy features, drift, text bias, group gaps).\n"
+            "    - 'risk_assessment': 1 sentence naming the risk tier and what it means operationally.\n"
+            "    - 'legal_exposure': 1 sentence identifying the specific legal risk under the applicable framework.\n"
+            "    - 'recommended_actions': Mirror of rectification_plan as plain action strings.\n\n"
+
+            "═══════════════════ JSON COMPLIANCE RULES ═══════════════════\n"
+            "RULE 1: Do NOT use double quotes inside string values. Use single quotes if quoting within text.\n"
+            "RULE 2: Every string must be a valid JSON string (escaped properly).\n"
+            "RULE 3: Return ONLY the JSON object — no markdown fences, no preamble, no explanation.\n"
+            "RULE 4: All list fields must be actual JSON arrays [ ... ], never a string.\n"
+            "RULE 5: All object fields must be actual JSON objects { ... }, never a string.\n\n"
+
+            "═══════════════════ REQUIRED OUTPUT SCHEMA ═══════════════════\n"
             "{\n"
             "  \"intent\": \"bias_detection\" | \"mitigation\",\n"
             "  \"domain\": \"hiring\" | \"credit\" | \"housing\" | \"healthcare\" | \"general\",\n"
             "  \"legal_context\": { \"domain\": \"...\", \"framework\": \"...\", \"notes\": \"...\" },\n"
+            "  \"bias_types\": [ \"Selection Bias\", \"Proxy Discrimination\", ... ],\n"
+            "  \"proxy_analysis\": [\n"
+            "    { \"feature\": \"...\", \"correlation\": 0.00, \"direction\": \"positive|negative\",\n"
+            "      \"strength\": \"strong|moderate|weak\", \"why_it_matters\": \"...\", \"how_to_fix\": \"...\" }\n"
+            "  ],\n"
+            "  \"bsi_interpretation\": { \"score\": 0.0, \"band\": \"...\", \"meaning\": \"...\", \"trend\": \"...\" },\n"
             "  \"warnings\": [ ... ],\n"
             "  \"info_notes\": [ ... ],\n"
-            "  \"suggestions\": [ ... ],\n"
             "  \"explanation\": \"...\",\n"
             "  \"summary\": \"...\",\n"
             "  \"report_text\": \"...\",\n"
             "  \"counterfactuals\": [ ... ],\n"
+            "  \"rectification_plan\": [\n"
+            "    { \"priority\": 1, \"action\": \"...\", \"description\": \"...\",\n"
+            "      \"expected_impact\": \"...\", \"timeline\": \"...\" }\n"
+            "  ],\n"
+            "  \"suggestions\": [ ... ],\n"
             "  \"audit_narrative\": {\n"
             "    \"executive_summary\": \"...\",\n"
             "    \"findings\": [ ... ],\n"
@@ -882,19 +1005,28 @@ class LLMService:
             response = self.client.chat.completions.create(
                 model=self.model,
                 messages=[
-                    {"role": "system", "content": "Output only valid JSON conforming to the schema. Keep text values brief and concise to save tokens. Do not use double quotes inside string values under any circumstances."},
+                    {
+                        "role": "system",
+                        "content": (
+                            "You are a precise AI fairness auditing engine. "
+                            "Output ONLY a single valid JSON object — no markdown, no commentary, no preamble. "
+                            "Every string value must use single quotes internally (never raw double quotes). "
+                            "Every field in the schema is REQUIRED. "
+                            "Reference actual group names, numbers, and feature names from the context — never use placeholders."
+                        ),
+                    },
                     {"role": "user", "content": prompt},
                 ],
-                temperature=0.3,
-                max_tokens=3000,
+                temperature=0.25,
+                max_tokens=4000,
             )
             content = response.choices[0].message.content or "{}"
             payload = self._parse_json(content)
 
-            # Extract and validate fields
+            # ── Standard fields ──────────────────────────────────────────
             intent = payload.get("intent", fallback_combined["intent"])
             domain = payload.get("domain", fallback_combined["domain"])
-            
+
             legal_ctx = payload.get("legal_context", {})
             if not isinstance(legal_ctx, dict):
                 legal_ctx = fallback_combined["legal_context"]
@@ -949,10 +1081,71 @@ class LLMService:
                     "recommended_actions": [str(a) for a in narrative_out.get("recommended_actions", [])] if isinstance(narrative_out.get("recommended_actions"), list) else fallback_combined["audit_narrative"]["recommended_actions"],
                 }
 
+            # ── NEW: bias type classification ────────────────────────────────
+            _VALID_BIAS_TYPES = {
+                "Selection Bias", "Historical Bias", "Proxy Discrimination",
+                "Measurement Bias", "Label Bias", "Representation Bias",
+                "Algorithmic Amplification", "Temporal Drift Bias", "Text/Language Bias",
+            }
+            bias_types_raw = payload.get("bias_types", [])
+            bias_types_out: list[str] = (
+                [str(b) for b in bias_types_raw if str(b) in _VALID_BIAS_TYPES]
+                if isinstance(bias_types_raw, list)
+                else []
+            )
+
+            # ── NEW: proxy analysis detail ─────────────────────────────────
+            proxy_analysis_raw = payload.get("proxy_analysis", [])
+            proxy_analysis_out: list[dict[str, object]] = []
+            if isinstance(proxy_analysis_raw, list):
+                for item in proxy_analysis_raw:
+                    if isinstance(item, dict):
+                        proxy_analysis_out.append({
+                            "feature": str(item.get("feature", "")),
+                            "correlation": float(item.get("correlation", 0.0)),
+                            "direction": str(item.get("direction", "")),
+                            "strength": str(item.get("strength", "")),
+                            "why_it_matters": str(item.get("why_it_matters", "")),
+                            "how_to_fix": str(item.get("how_to_fix", "")),
+                        })
+
+            # ── NEW: BSI interpretation ───────────────────────────────────
+            bsi_interp_raw = payload.get("bsi_interpretation", {})
+            bsi_interp_out: dict[str, object] = {
+                "score": bsi_score,
+                "band": bsi_band,
+                "meaning": "",
+                "trend": drift_status,
+            }
+            if isinstance(bsi_interp_raw, dict):
+                bsi_interp_out["meaning"] = str(bsi_interp_raw.get("meaning", ""))
+                if bsi_interp_raw.get("trend"):
+                    bsi_interp_out["trend"] = str(bsi_interp_raw["trend"])
+
+            # ── NEW: rectification plan ───────────────────────────────────
+            rect_plan_raw = payload.get("rectification_plan", [])
+            rect_plan_out: list[dict[str, object]] = []
+            if isinstance(rect_plan_raw, list):
+                for step in rect_plan_raw:
+                    if isinstance(step, dict):
+                        rect_plan_out.append({
+                            "priority": int(step.get("priority", 0)),
+                            "action": str(step.get("action", "")),
+                            "description": str(step.get("description", "")),
+                            "expected_impact": str(step.get("expected_impact", "")),
+                            "timeline": str(step.get("timeline", "")),
+                        })
+
             return {
                 "intent": intent,
                 "domain": domain,
                 "legal_context": legal_ctx,
+                # ── new enriched fields ──
+                "bias_types": bias_types_out,
+                "proxy_analysis": proxy_analysis_out,
+                "bsi_interpretation": bsi_interp_out,
+                "rectification_plan": rect_plan_out,
+                # ── standard fields ──
                 "warnings": warnings_out,
                 "info_notes": info_notes_out,
                 "suggestions": suggestions_out,
