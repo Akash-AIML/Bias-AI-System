@@ -106,6 +106,16 @@ export function FileUpload() {
   }, [isLoading]);
 
   async function parseColumnsFromFile(selectedFile: File) {
+    // Frontend guard: reject files over 50 MB immediately (backend limit is same)
+    const MAX_FILE_BYTES = 50 * 1024 * 1024;
+    if (selectedFile.size > MAX_FILE_BYTES) {
+      setError(
+        `File is too large (${(selectedFile.size / 1024 / 1024).toFixed(1)} MB). ` +
+        `Maximum supported size is 50 MB. Please reduce the dataset size or sample it down.`
+      );
+      return;
+    }
+
     setIsParsing(true);
     try {
       const text = await selectedFile.text();

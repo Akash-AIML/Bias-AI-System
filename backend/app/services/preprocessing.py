@@ -7,6 +7,12 @@ import warnings
 
 import pandas as pd
 
+# Maximum file size accepted by the API (50 MB)
+_MAX_FILE_BYTES = 50 * 1024 * 1024
+
+# Rows used for fast column-role scoring (header + sample is enough)
+_SUGGEST_NROWS = 1000
+
 
 @dataclass
 class PreprocessedData:
@@ -22,8 +28,14 @@ class PreprocessedData:
 
 
 def suggest_column_roles(file_bytes: bytes) -> dict[str, Any]:
+    if len(file_bytes) > _MAX_FILE_BYTES:
+        raise ValueError(
+            f"File is too large ({len(file_bytes) / 1024 / 1024:.1f} MB). "
+            f"Maximum allowed size is {_MAX_FILE_BYTES // 1024 // 1024} MB."
+        )
     try:
-        df = pd.read_csv(BytesIO(file_bytes))
+        # Speed fix: only read the first 1000 rows — plenty for scoring column roles
+        df = pd.read_csv(BytesIO(file_bytes), nrows=_SUGGEST_NROWS)
     except Exception as error:
         raise ValueError("Failed to parse CSV file") from error
 
@@ -226,6 +238,11 @@ def load_and_preprocess(
     time_column: str | None = None,
     text_columns: list[str] | None = None,
 ) -> PreprocessedData:
+    if len(file_bytes) > _MAX_FILE_BYTES:
+        raise ValueError(
+            f"File is too large ({len(file_bytes) / 1024 / 1024:.1f} MB). "
+            f"Maximum allowed size is {_MAX_FILE_BYTES // 1024 // 1024} MB."
+        )
     try:
         df = pd.read_csv(BytesIO(file_bytes))
     except Exception as error:

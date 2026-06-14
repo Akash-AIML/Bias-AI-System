@@ -52,6 +52,7 @@ class AnalyzeResponse(BaseModel):
     dp_diff: float
     eo_diff: float
     bsi_score: float
+    disparate_impact_ratio: float
     risk_tier: dict[str, str]
     proxy_features: list[dict[str, object]]
     temporal_drift: dict[str, object]
@@ -72,6 +73,11 @@ class AnalyzeResponse(BaseModel):
     target_transformation: dict[str, Any]
     audit_report: dict[str, Any]
     mitigation_simulations: list[dict[str, Any]] = []
+    # ── enriched LLM output fields ──
+    bias_types: list[str] = []
+    proxy_analysis: list[dict[str, Any]] = []
+    bsi_interpretation: dict[str, Any] = {}
+    rectification_plan: list[dict[str, Any]] = []
 
 
 class ReportRequest(BaseModel):
@@ -370,6 +376,7 @@ async def analyze_dataset(
         categorical_features=analysis_categorical_features,
         target_binarization_threshold=target_binarization_threshold,
         weight_column=weight_column,
+        baseline_result=fairness_result,  # reuse — avoids a second training run
     )
     print(f"[SERVICES] Completed simulate_mitigation in {time.time() - t_sim:.3f}s")
 
@@ -381,6 +388,7 @@ async def analyze_dataset(
             "dp_diff": fairness_result.dp_diff,
             "eo_diff": fairness_result.eo_diff,
             "bsi_score": fairness_result.bsi_score,
+            "disparate_impact_ratio": fairness_result.disparate_impact_ratio,
         },
         "group_metrics": fairness_result.group_metrics,
         "warnings": fairness_result.warnings,
@@ -401,6 +409,7 @@ async def analyze_dataset(
         dp_diff=fairness_result.dp_diff,
         eo_diff=fairness_result.eo_diff,
         bsi_score=fairness_result.bsi_score,
+        disparate_impact_ratio=fairness_result.disparate_impact_ratio,
         risk_tier=_serialize_value(risk_tier),
         proxy_features=[_serialize_value(proxy) for proxy in proxy_features],
         temporal_drift=_serialize_value(temporal_drift),
@@ -424,6 +433,11 @@ async def analyze_dataset(
         target_transformation=fairness_result.target_transformation,
         audit_report=audit_report,
         mitigation_simulations=[_serialize_value(simulation) for simulation in simulations],
+        # ── enriched LLM fields ──
+        bias_types=report.get("bias_types", []),
+        proxy_analysis=report.get("proxy_analysis", []),
+        bsi_interpretation=report.get("bsi_interpretation", {}),
+        rectification_plan=report.get("rectification_plan", []),
     )
 
 

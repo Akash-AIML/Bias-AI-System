@@ -24,27 +24,24 @@ def apply_group_reweighting(
     s_counts = s_values.value_counts(dropna=False)
     y_counts = y_true.value_counts(dropna=False)
 
-    temp_df = pd.DataFrame({
-        "S": s_values,
-        "Y": y_true
-    })
+    temp_df = pd.DataFrame({"S": s_values, "Y": y_true})
 
-    joint_counts = temp_df.groupby(["S", "Y"]).size().to_dict()
+    joint_counts = temp_df.groupby(["S", "Y"]).size().rename("n_sy")
 
-    weights = {}
-    for (s_val, y_val) in joint_counts.keys():
-        n_s = float(s_counts.get(s_val, 0))
-        n_y = float(y_counts.get(y_val, 0))
-        n_sy = float(joint_counts.get((s_val, y_val), 0))
+    # ── Speed fix: vectorized weight computation instead of row-wise apply ──
+    # Build a lookup DataFrame and merge — O(n_groups * n_classes) not O(n_rows)
+    weight_df = joint_counts.reset_index()
+    weight_df["n_s"] = weight_df["S"].map(s_counts)
+    weight_df["n_y"] = weight_df["Y"].map(y_counts)
+    weight_df["weight"] = (weight_df["n_s"] * weight_df["n_y"]) / (n * weight_df["n_sy"])
+    weight_df.loc[weight_df["n_sy"] == 0, "weight"] = 1.0
 
-        if n_sy > 0:
-            weights[(s_val, y_val)] = (n_s * n_y) / (n * n_sy)
-        else:
-            weights[(s_val, y_val)] = 1.0
+    # Merge weights back to the full DataFrame via a join — pure pandas, no Python loop
+    temp_merged = temp_df.merge(
+        weight_df[["S", "Y", "weight"]], on=["S", "Y"], how="left"
+    )
+    temp_merged["weight"] = temp_merged["weight"].fillna(1.0)
 
     reweighted = df.copy()
-    reweighted["sample_weight"] = temp_df.apply(
-        lambda row: weights.get((row["S"], row["Y"]), 1.0), axis=1
-    ).astype(float)
-
+    reweighted["sample_weight"] = temp_merged["weight"].values.astype(float)
     return reweighted

@@ -4,7 +4,7 @@ from dataclasses import dataclass
 
 import pandas as pd
 
-from app.services.fairness import compute_fairness
+from app.services.fairness import FairnessResult, compute_fairness
 from app.services.reweighting import apply_group_reweighting
 
 
@@ -25,18 +25,40 @@ def simulate_mitigation(
     categorical_features: list[str],
     target_binarization_threshold: float | None = None,
     weight_column: str | None = None,
+    baseline_result: FairnessResult | None = None,
 ) -> list[SimulationResult]:
-    baseline = _compute(
-        dataframe,
-        target,
-        sensitive,
-        prediction_column,
-        numeric_features,
-        categorical_features,
-        target_binarization_threshold,
-        weight_column,
-    )
-    simulations = [SimulationResult(name="baseline", **baseline)]
+    """Simulate mitigation strategies and return their fairness metrics.
+
+    Parameters
+    ----------
+    baseline_result:
+        If provided (the already-computed main fairness result), it is used
+        directly as the baseline — skipping a redundant second model training
+        run.  This is the dominant speed fix: on large datasets a single proxy
+        model training takes 5-20 seconds; providing the baseline avoids that.
+    """
+    # ── Speed fix: reuse pre-computed baseline instead of re-training ────────
+    if baseline_result is not None:
+        baseline_sim = SimulationResult(
+            name="baseline",
+            bsi_score=baseline_result.bsi_score,
+            dp_diff=baseline_result.dp_diff,
+            eo_diff=baseline_result.eo_diff,
+        )
+    else:
+        baseline_metrics = _compute(
+            dataframe,
+            target,
+            sensitive,
+            prediction_column,
+            numeric_features,
+            categorical_features,
+            target_binarization_threshold,
+            weight_column,
+        )
+        baseline_sim = SimulationResult(name="baseline", **baseline_metrics)
+
+    simulations = [baseline_sim]
 
     try:
         reweighted = apply_group_reweighting(

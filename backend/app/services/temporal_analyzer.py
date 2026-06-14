@@ -7,6 +7,10 @@ import pandas as pd
 
 from app.services.fairness import compute_fairness
 
+# Cap each temporal half at this many rows for proxy model training speed.
+# Temporal drift only needs a representative sample to detect trends.
+_TEMPORAL_ROW_CAP = 5_000
+
 
 @dataclass
 class TemporalDriftResult:
@@ -51,7 +55,7 @@ def analyze_temporal_drift(
     sorted_df["_parsed_time"] = parsed
     sorted_df = sorted_df.dropna(subset=["_parsed_time"]).sort_values("_parsed_time")
 
-    if len(sorted_df) < 40:
+    if len(sorted_df) < 60:
         return TemporalDriftResult(
             status="insufficient_data",
             time_column=time_column,
@@ -63,6 +67,12 @@ def analyze_temporal_drift(
     midpoint = len(sorted_df) // 2
     early_df = sorted_df.iloc[:midpoint]
     late_df = sorted_df.iloc[midpoint:]
+
+    # Speed fix: cap each half for proxy training
+    if len(early_df) > _TEMPORAL_ROW_CAP:
+        early_df = early_df.sample(n=_TEMPORAL_ROW_CAP, random_state=42)
+    if len(late_df) > _TEMPORAL_ROW_CAP:
+        late_df = late_df.sample(n=_TEMPORAL_ROW_CAP, random_state=42)
 
     def _slice(df: pd.DataFrame) -> dict[str, pd.Series | pd.DataFrame]:
         labels = df[target]

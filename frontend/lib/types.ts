@@ -1,6 +1,8 @@
 export type GroupMetric = {
   accuracy: number;
   selection_rate: number;
+  fpr?: number;   // False Positive Rate per group
+  fnr?: number;   // False Negative Rate per group
 };
 
 export type AuditReport = {
@@ -10,6 +12,7 @@ export type AuditReport = {
     dp_diff: number;
     eo_diff: number;
     bsi_score?: number;
+    disparate_impact_ratio?: number;  // EEOC 4/5ths rule (< 0.8 = adverse impact)
   };
   group_metrics: Record<string, GroupMetric>;
   warnings: string[];
@@ -94,12 +97,54 @@ export type AuditNarrative = {
   counterfactuals: string[];
 };
 
+// ── New enriched LLM output types ──
+
+/** Taxonomy-validated bias label returned by the AI. */
+export type BiasType =
+  | 'Selection Bias'
+  | 'Historical Bias'
+  | 'Proxy Discrimination'
+  | 'Measurement Bias'
+  | 'Label Bias'
+  | 'Representation Bias'
+  | 'Algorithmic Amplification'
+  | 'Temporal Drift Bias'
+  | 'Text/Language Bias';
+
+/** AI-generated per-proxy-feature analysis with remediation. */
+export type ProxyAnalysisItem = {
+  feature: string;
+  correlation: number;
+  direction: 'positive' | 'negative';
+  strength: 'strong' | 'moderate' | 'weak';
+  why_it_matters: string;
+  how_to_fix: string;
+};
+
+/** BSI band, plain-English meaning, and drift trend from AI. */
+export type BSIInterpretation = {
+  score: number;
+  band: string;        // e.g. "HIGH (40-65): significant bias present"
+  meaning: string;     // plain-English sentence for this specific dataset
+  trend: string;       // e.g. "worsening", "stable", "not_available"
+};
+
+/** One step in the AI-generated 4-step prioritised rectification plan. */
+export type RectificationStep = {
+  priority: number;          // 1 = highest
+  action: string;            // short title
+  description: string;       // 1-2 sentences citing specific features/groups
+  expected_impact: string;   // e.g. "Reduces DP gap by ~8%"
+  timeline: string;          // e.g. "1-3 months"
+};
+
 export type AnalyzeResponse = {
   bias: boolean;
   audit_id: string;
   dp_diff: number;
   eo_diff: number;
   bsi_score: number;
+  disparate_impact_ratio: number;  // EEOC 4/5ths rule: < 0.8 indicates adverse impact
   risk_tier: RiskTier;
   proxy_features: ProxyFeature[];
   temporal_drift: TemporalDrift;
@@ -120,4 +165,9 @@ export type AnalyzeResponse = {
   target_transformation: TargetTransformation;
   audit_report: AuditReport;
   mitigation_simulations: MitigationSimulation[];
+  // ── enriched LLM output ──
+  bias_types: BiasType[];
+  proxy_analysis: ProxyAnalysisItem[];
+  bsi_interpretation: BSIInterpretation;
+  rectification_plan: RectificationStep[];
 };
