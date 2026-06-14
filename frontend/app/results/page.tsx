@@ -30,6 +30,39 @@ import type { AnalyzeResponse } from "@/lib/types";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000/api";
 
+function Typewriter({ text, speed = 8 }: { text: string; speed?: number }) {
+  const [displayedText, setDisplayedText] = useState("");
+  const [isDone, setIsDone] = useState(false);
+
+  useEffect(() => {
+    let index = 0;
+    setDisplayedText("");
+    setIsDone(false);
+
+    if (!text) return;
+
+    const interval = setInterval(() => {
+      setDisplayedText(text.slice(0, index + 1));
+      index++;
+      if (index >= text.length) {
+        clearInterval(interval);
+        setIsDone(true);
+      }
+    }, speed);
+
+    return () => clearInterval(interval);
+  }, [text, speed]);
+
+  return (
+    <span className="leading-relaxed">
+      {displayedText}
+      {!isDone && (
+        <span className="inline-block w-[2px] h-[1.1em] ml-1 align-middle bg-[var(--accent)] animate-pulse" />
+      )}
+    </span>
+  );
+}
+
 export default function ResultsPage() {
   const router = useRouter();
   const [data, setData] = useState<AnalyzeResponse | null>(null);
@@ -562,7 +595,9 @@ export default function ResultsPage() {
                 <CardTitle>Explanation Summary</CardTitle>
               </CardHeader>
               <CardContent className="space-y-3 text-sm text-[var(--text)]">
-                <p className="typewriter">{data.summary}</p>
+                <p className="text-base font-medium text-[var(--text)] leading-relaxed">
+                  <Typewriter text={data.summary} />
+                </p>
                 <Separator />
                 <p>{data.explanation}</p>
                 <Separator />
