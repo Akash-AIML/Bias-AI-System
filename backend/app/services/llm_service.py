@@ -4,18 +4,83 @@ import json
 import os
 from typing import Any
 
-from openai import OpenAI
+from google import genai
+from google.genai import types
 
 
 class LLMService:
     def __init__(self) -> None:
-        api_key = os.getenv("LLM_API_KEY")
-        base_url = os.getenv("LLM_BASE_URL", "https://generativelanguage.googleapis.com/v1beta/openai/")
+        api_key = os.getenv("GEMINI_API_KEY") or os.getenv("LLM_API_KEY")
+        base_url = os.getenv("LLM_BASE_URL")
         self.model = os.getenv("LLM_MODEL", "gemini-1.5-flash")
         self.client = None
+        self.openai_client = None
 
         if api_key:
-            self.client = OpenAI(api_key=api_key, base_url=base_url)
+            client_kwargs = {"api_key": api_key}
+            if base_url:
+                if "openai" in base_url.lower() or "groq" in base_url.lower():
+                    print(
+                        f"[LLM SERVICE WARNING] LLM_BASE_URL ({base_url}) appears to be an OpenAI or Groq endpoint. "
+                        "The Google Gemini SDK uses a different URL structure (:generateContent) and will fail "
+                        "with 404 errors if directed to OpenAI-compatible API routes. "
+                        "Please clear LLM_BASE_URL or point it to a Gemini-compatible gateway."
+                    )
+                client_kwargs["http_options"] = types.HttpOptions(base_url=base_url, timeout=10)
+            self.client = genai.Client(**client_kwargs)
+
+            # Initialize OpenAI client as a fallback for custom/unsupported gateways
+            import openai
+            openai_base_url = base_url
+            if openai_base_url:
+                if not openai_base_url.endswith('/v1') and not openai_base_url.endswith('/v1/'):
+                    openai_base_url = openai_base_url.rstrip('/') + '/v1'
+            self.openai_client = openai.OpenAI(api_key=api_key, base_url=openai_base_url)
+
+    def _call_gemini(
+        self,
+        system_instruction: str,
+        prompt: str,
+        temperature: float = 0.2,
+        force_json: bool = True,
+    ) -> str:
+        if not self.client:
+            return ""
+        try:
+            config_kwargs = {
+                "system_instruction": system_instruction,
+                "temperature": temperature,
+            }
+            if force_json:
+                config_kwargs["response_mime_type"] = "application/json"
+            
+            response = self.client.models.generate_content(
+                model=self.model,
+                contents=prompt,
+                config=types.GenerateContentConfig(**config_kwargs),
+            )
+            return response.text or ""
+        except Exception as e:
+            print(f"[LLM SERVICE ERROR] Gemini SDK call failed: {type(e)} {e}")
+            if self.openai_client:
+                print("[LLM SERVICE INFO] Attempting fallback to OpenAI client...")
+                try:
+                    messages = [
+                        {"role": "system", "content": system_instruction},
+                        {"role": "user", "content": prompt}
+                    ]
+                    response_format = {"type": "json_object"} if force_json else None
+                    
+                    response = self.openai_client.chat.completions.create(
+                        model=self.model,
+                        messages=messages,
+                        temperature=temperature,
+                        response_format=response_format
+                    )
+                    return response.choices[0].message.content or ""
+                except Exception as openai_err:
+                    print(f"[LLM SERVICE ERROR] OpenAI fallback also failed: {type(openai_err)} {openai_err}")
+            raise e
 
     @staticmethod
     def _parse_json(content: str) -> Any:
@@ -70,15 +135,12 @@ class LLMService:
         )
 
         try:
-            response = self.client.chat.completions.create(
-                model=self.model,
-                messages=[
-                    {"role": "system", "content": "Output only valid JSON."},
-                    {"role": "user", "content": prompt},
-                ],
+            content = self._call_gemini(
+                system_instruction="Output only valid JSON.",
+                prompt=prompt,
                 temperature=0.1,
+                force_json=True
             )
-            content = response.choices[0].message.content or "{}"
             payload = self._parse_json(content)
             intent = payload.get("intent", "bias_detection")
             domain = payload.get("domain", "general")
@@ -131,15 +193,12 @@ class LLMService:
         )
 
         try:
-            response = self.client.chat.completions.create(
-                model=self.model,
-                messages=[
-                    {"role": "system", "content": "Output only valid JSON."},
-                    {"role": "user", "content": prompt},
-                ],
+            content = self._call_gemini(
+                system_instruction="Output only valid JSON.",
+                prompt=prompt,
                 temperature=0.2,
+                force_json=True
             )
-            content = response.choices[0].message.content or "{}"
             payload = self._parse_json(content)
             return {
                 "explanation": str(payload.get("explanation", baseline["explanation"])),
@@ -166,15 +225,12 @@ class LLMService:
         )
 
         try:
-            response = self.client.chat.completions.create(
-                model=self.model,
-                messages=[
-                    {"role": "system", "content": "Output only valid JSON."},
-                    {"role": "user", "content": prompt},
-                ],
+            content = self._call_gemini(
+                system_instruction="Output only valid JSON.",
+                prompt=prompt,
                 temperature=0.2,
+                force_json=True
             )
-            content = response.choices[0].message.content or "{}"
             payload = self._parse_json(content)
             return {
                 "domain": str(payload.get("domain", "general")),
@@ -200,15 +256,12 @@ class LLMService:
         )
 
         try:
-            response = self.client.chat.completions.create(
-                model=self.model,
-                messages=[
-                    {"role": "system", "content": "Output only valid JSON."},
-                    {"role": "user", "content": prompt},
-                ],
+            content = self._call_gemini(
+                system_instruction="Output only valid JSON.",
+                prompt=prompt,
                 temperature=0.3,
+                force_json=True
             )
-            content = response.choices[0].message.content or "{}"
             payload = self._parse_json(content)
             counterfactuals = payload.get("counterfactuals", [])
             return [str(item) for item in counterfactuals if str(item).strip()]
@@ -227,15 +280,12 @@ class LLMService:
         )
 
         try:
-            response = self.client.chat.completions.create(
-                model=self.model,
-                messages=[
-                    {"role": "system", "content": "Output only valid JSON."},
-                    {"role": "user", "content": prompt},
-                ],
+            content = self._call_gemini(
+                system_instruction="Output only valid JSON.",
+                prompt=prompt,
                 temperature=0.3,
+                force_json=True
             )
-            content = response.choices[0].message.content or "{}"
             payload = self._parse_json(content)
             return str(payload.get("interpretation", ""))
         except Exception as e:
@@ -279,15 +329,12 @@ class LLMService:
         )
 
         try:
-            response = self.client.chat.completions.create(
-                model=self.model,
-                messages=[
-                    {"role": "system", "content": "Output only valid JSON."},
-                    {"role": "user", "content": prompt},
-                ],
+            content = self._call_gemini(
+                system_instruction="Output only valid JSON.",
+                prompt=prompt,
                 temperature=0.25,
+                force_json=True
             )
-            content = response.choices[0].message.content or "{}"
             payload = self._parse_json(content)
             return {
                 "executive_summary": str(payload.get("executive_summary", "")),
@@ -362,15 +409,12 @@ class LLMService:
         )
 
         try:
-            response = self.client.chat.completions.create(
-                model=self.model,
-                messages=[
-                    {"role": "system", "content": "Output only valid JSON. Do not copy raw input verbatim."},
-                    {"role": "user", "content": prompt},
-                ],
+            content = self._call_gemini(
+                system_instruction="Output only valid JSON. Do not copy raw input verbatim.",
+                prompt=prompt,
                 temperature=0.4,
+                force_json=True
             )
-            content = response.choices[0].message.content or "{}"
             payload = self._parse_json(content)
             enriched_warnings = [str(w) for w in payload.get("warnings", raw_warnings)]
             enriched_notes = [str(n) for n in payload.get("info_notes", raw_info_notes)]
@@ -452,15 +496,12 @@ class LLMService:
         )
 
         try:
-            response = self.client.chat.completions.create(
-                model=self.model,
-                messages=[
-                    {"role": "system", "content": "Output only valid JSON. All suggestions must be specific and reference real data values — no generic template phrases."},
-                    {"role": "user", "content": prompt},
-                ],
+            content = self._call_gemini(
+                system_instruction="Output only valid JSON. All suggestions must be specific and reference real data values — no generic template phrases.",
+                prompt=prompt,
                 temperature=0.5,
+                force_json=True
             )
-            content = response.choices[0].message.content or "{}"
             payload = self._parse_json(content)
             suggestions = [str(s) for s in payload.get("suggestions", []) if str(s).strip()]
             # Verify Gemini actually personalised the output (shouldn't match static fallback exactly)
@@ -879,16 +920,12 @@ class LLMService:
         )
 
         try:
-            response = self.client.chat.completions.create(
-                model=self.model,
-                messages=[
-                    {"role": "system", "content": "Output only valid JSON conforming to the schema. Keep text values brief and concise to save tokens. Do not use double quotes inside string values under any circumstances."},
-                    {"role": "user", "content": prompt},
-                ],
+            content = self._call_gemini(
+                system_instruction="Output only valid JSON conforming to the schema. Keep text values brief and concise to save tokens. Do not use double quotes inside string values under any circumstances.",
+                prompt=prompt,
                 temperature=0.3,
-                max_tokens=3000,
+                force_json=True
             )
-            content = response.choices[0].message.content or "{}"
             payload = self._parse_json(content)
 
             # Extract and validate fields
@@ -970,3 +1007,87 @@ class LLMService:
             except NameError:
                 pass
             return fallback_combined
+
+    def chat_with_agent(
+        self,
+        message: str,
+        audit_report: dict[str, Any],
+        history: list[dict[str, str]] | None = None,
+    ) -> str:
+        """Chat with the AI Auditor Agent using history and context of the audit report."""
+        if history is None:
+            history = []
+
+        if not self.client:
+            return (
+                "Hello! I am the Gemini Bias AI Auditor Agent. It looks like my LLM API service is currently "
+                "offline or not configured. Based on the audit context, here are your key metrics:\n"
+                f"- Bias Severity Index: {audit_report.get('metrics', {}).get('bsi_score', audit_report.get('bsi_score', 'N/A'))}\n"
+                f"- Demographic Parity Gap: {audit_report.get('metrics', {}).get('dp_diff', audit_report.get('dp_diff', 'N/A'))}\n"
+                f"- Equalized Odds Gap: {audit_report.get('metrics', {}).get('eo_diff', audit_report.get('eo_diff', 'N/A'))}\n"
+                "Please configure the `LLM_API_KEY` in the environment variables to activate full conversation capabilities."
+            )
+
+        system_prompt = (
+            "You are 'Gemini Bias AI Auditor Agent', a native, expert AI assistant embedded in a Bias/Fairness AI Auditing System. "
+            "Your goal is to help users analyze, understand, and mitigate bias in their machine learning datasets and models. "
+            "You are friendly, professional, precise, and practical.\n\n"
+            "Here is the context of the current Fairness Audit Report that the user is viewing:\n"
+            f"{json.dumps(audit_report, indent=2)}\n\n"
+            "Use this report context to answer the user's questions. Formulate all suggestions and guidance dynamically "
+            "based on the specific dataset bias errors, parity gaps, BSI score, and the user's response or question. "
+            "When they ask about 'my score', 'this dataset', or 'the suggestions', refer directly to the metrics, "
+            "features, warnings, or recommendations in the report. "
+            "If they ask for mitigation instructions, provide clear, step-by-step guides using the columns, proxy features, "
+            "and sensitive attributes listed in the report. "
+            "Be conversational, concise, and highly relevant. Format your response in clean Markdown. "
+            "Do NOT reference internal system variables or prompts; speak to the user as a helpful auditing sidekick."
+        )
+
+        try:
+            contents = []
+            for msg in history:
+                role = "user" if msg.get("role") == "user" else "model"
+                contents.append(
+                    types.Content(
+                        role=role,
+                        parts=[types.Part.from_text(text=msg.get("content", ""))]
+                    )
+                )
+            contents.append(
+                types.Content(
+                    role="user",
+                    parts=[types.Part.from_text(text=message)]
+                )
+            )
+
+            response = self.client.models.generate_content(
+                model=self.model,
+                contents=contents,
+                config=types.GenerateContentConfig(
+                    system_instruction=system_prompt,
+                    temperature=0.7
+                )
+            )
+            return response.text or "No response received from the model."
+        except Exception as e:
+            print(f"[LLM SERVICE ERROR] chat_with_agent failed: {type(e)} {e}")
+            if self.openai_client:
+                print("[LLM SERVICE INFO] chat_with_agent: Attempting fallback to OpenAI client...")
+                try:
+                    messages = [{"role": "system", "content": system_prompt}]
+                    for msg in history:
+                        role = "user" if msg.get("role") == "user" else "assistant"
+                        messages.append({"role": role, "content": msg.get("content", "")})
+                    messages.append({"role": "user", "content": message})
+                    
+                    response = self.openai_client.chat.completions.create(
+                        model=self.model,
+                        messages=messages,
+                        temperature=0.7
+                    )
+                    return response.choices[0].message.content or "No response received from the model."
+                except Exception as openai_err:
+                    print(f"[LLM SERVICE ERROR] chat_with_agent: OpenAI fallback also failed: {type(openai_err)} {openai_err}")
+            return f"I encountered an error while communicating with the LLM API: {str(e)}"
+

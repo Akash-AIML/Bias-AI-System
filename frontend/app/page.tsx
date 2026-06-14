@@ -10,10 +10,10 @@ export default function HomePage() {
         <div className="mb-6 flex items-start justify-between gap-4">
           <div className="space-y-3 mt-5">
             <h1 className="text-5xl font-semibold text-[var(--text)] animate-fade-rise">
-              AI Accountability Audit System
+              AI Audit System
             </h1>
             <p className="max-w-2xl text-sm text-[var(--text-soft)] animate-fade-rise">
-              Upload a CSV, configure accountability inputs, and generate compliance-ready findings.
+              Upload a CSV, configure inputs, and generate compliance-ready findings.
             </p>
           </div>
         </div>

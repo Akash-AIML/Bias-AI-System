@@ -3,7 +3,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { PanelRightOpen } from "lucide-react";
+import { PanelRightOpen, Sparkles } from "lucide-react";
+import { GeminiAgentDrawer } from "@/components/GeminiAgentDrawer";
+import type { AgentMessage } from "@/components/GeminiAgentDrawer";
 
 import { BiasChart } from "@/components/BiasChart";
 import { GaugeChart } from "@/components/GaugeChart";
@@ -35,6 +37,62 @@ export default function ResultsPage() {
   const [showSheet, setShowSheet] = useState(false);
   const [analysisMeta, setAnalysisMeta] = useState<Record<string, string> | null>(null);
   const [analysisFile, setAnalysisFile] = useState<File | null>(null);
+
+  // Gemini Chat Agent States
+  const [isAgentOpen, setIsAgentOpen] = useState(false);
+  const [agentMessages, setAgentMessages] = useState<AgentMessage[]>([]);
+  const [isAgentLoading, setIsAgentLoading] = useState(false);
+
+  async function handleSendAgentMessage(messageText: string) {
+    if (!data) return;
+
+    const userMsg: AgentMessage = { role: "user", content: messageText };
+    const updatedMessages = [...agentMessages, userMsg];
+    setAgentMessages(updatedMessages);
+    setIsAgentLoading(true);
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/agent`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          message: messageText,
+          history: agentMessages,
+          audit_report: data.audit_report,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error("Failed to query Gemini Agent");
+      }
+
+      const payload = await response.json();
+      setAgentMessages([
+        ...updatedMessages,
+        { role: "assistant", content: payload.response },
+      ]);
+    } catch (err) {
+      setAgentMessages([
+        ...updatedMessages,
+        {
+          role: "assistant",
+          content: "Sorry, I had trouble reaching the auditing backend. Please verify that the server is running.",
+        },
+      ]);
+    } finally {
+      setIsAgentLoading(false);
+    }
+  }
+
+  function handleClearAgentHistory() {
+    setAgentMessages([]);
+  }
+
+  async function handleAskGeminiSuggestion(suggestionText: string) {
+    setIsAgentOpen(true);
+    const promptText = `Please provide a detailed, step-by-step implementation guide to address this mitigation suggestion:\n\n"${suggestionText}"`;
+    await handleSendAgentMessage(promptText);
+  }
 
   useEffect(() => {
     const raw = localStorage.getItem("analysisResult");
@@ -204,7 +262,7 @@ export default function ResultsPage() {
         <div className="flex items-start justify-between gap-4">
           <div>
             <h1 className="text-4xl font-semibold tracking-tight text-[var(--text)] animate-fade-rise">
-              Accountability Audit Dashboard
+              Audit Dashboard
             </h1>
             <p className="mt-2 max-w-2xl text-sm text-[var(--text-soft)] animate-fade-rise">
               Review bias severity, proxy discrimination signals, and compliance-ready findings.
@@ -352,7 +410,7 @@ export default function ResultsPage() {
           </TabsContent>
 
           <TabsContent value="mitigation">
-            <SuggestionBox suggestions={data.suggestions} />
+            <SuggestionBox suggestions={data.suggestions} onAskGemini={handleAskGeminiSuggestion} />
           </TabsContent>
 
           <TabsContent value="accountability" className="space-y-4">
@@ -585,6 +643,28 @@ export default function ResultsPage() {
           </SheetContent>
         </Sheet>
       </div>
+
+      {/* Floating Action Button for Gemini Chat Agent */}
+      <div className="fixed bottom-6 right-6 z-40 flex flex-col items-end gap-2 animate-fade-rise">
+        <button
+          onClick={() => setIsAgentOpen(true)}
+          className="flex items-center gap-2 px-5 py-3.5 bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-500 hover:to-violet-500 text-white rounded-full shadow-lg hover:shadow-indigo-500/30 font-semibold transition-all transform hover:-translate-y-1 hover:scale-105 active:scale-95 duration-200 group border border-indigo-400/20"
+        >
+          <Sparkles size={16} className="text-indigo-200 group-hover:rotate-12 transition-transform" />
+          <span>Ask Gemini Agent</span>
+        </button>
+      </div>
+
+      {/* Slide-out Gemini Chat Drawer */}
+      <GeminiAgentDrawer
+        open={isAgentOpen}
+        onOpenChange={setIsAgentOpen}
+        auditReport={data.audit_report}
+        messages={agentMessages}
+        isLoading={isAgentLoading}
+        onSubmitMessage={handleSendAgentMessage}
+        onClearHistory={handleClearAgentHistory}
+      />
     </main>
   );
 }

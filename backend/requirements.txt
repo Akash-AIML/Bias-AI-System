@@ -6,7 +6,9 @@ numpy
 scikit-learn
 fairlearn
 openai
+google-genai
 python-dotenv
 reportlab
 sentence-transformers
 vaderSentiment
+eval-type-backport

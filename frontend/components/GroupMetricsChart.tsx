@@ -36,6 +36,7 @@ export function GroupMetricsChart({ metrics }: GroupMetricsChartProps) {
                   borderRadius: 12,
                   color: "var(--text)",
                 }}
+                cursor={{ fill: "var(--surface-muted)", opacity: 0.15 }}
               />
               <Legend />
               <Bar dataKey="accuracy" fill="var(--brand)" radius={[6, 6, 0, 0]} />

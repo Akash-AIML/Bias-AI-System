@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+import warnings
+warnings.filterwarnings("ignore", category=RuntimeWarning)
+warnings.filterwarnings("ignore", category=UserWarning)
+
 from collections import Counter
 from dataclasses import dataclass
 
@@ -15,7 +19,7 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import accuracy_score
 from sklearn.model_selection import train_test_split
 from sklearn.pipeline import Pipeline
-from sklearn.preprocessing import LabelEncoder, OneHotEncoder
+from sklearn.preprocessing import LabelEncoder, OneHotEncoder, StandardScaler
 
 
 @dataclass
@@ -175,6 +179,7 @@ def _normalize_target(
     }
 
 
+
 def _encode_binary(series: pd.Series) -> tuple[pd.Series, list[str]]:
     warnings: list[str] = []
     numeric_values = pd.to_numeric(series, errors="coerce")
@@ -182,8 +187,17 @@ def _encode_binary(series: pd.Series) -> tuple[pd.Series, list[str]]:
     if numeric_values.notna().mean() > 0.95:
         unique_values = sorted(set(numeric_values.dropna().unique().tolist()))
         if len(unique_values) > 2:
-            warnings.append("Predictions were numeric; values were thresholded at 0.5.")
-            return (numeric_values >= 0.5).astype(int), warnings
+            binary = (numeric_values >= 0.5).astype(int)
+            if binary.nunique() < 2:
+                median_val = float(numeric_values.median())
+                binary = (numeric_values >= median_val).astype(int)
+                warnings.append(
+                    f"Predictions were continuous numeric and thresholding at 0.5 resulted in a constant output; "
+                    f"they were thresholded at their median ({median_val:.4g}) instead to enable fairness comparison."
+                )
+            else:
+                warnings.append("Predictions were numeric; values were thresholded at 0.5.")
+            return binary, warnings
         if len(unique_values) != 2:
             raise ValueError("Prediction column must be binary for fairness analysis.")
 
@@ -203,7 +217,7 @@ def _encode_binary(series: pd.Series) -> tuple[pd.Series, list[str]]:
 def _build_model(numeric_features: list[str], categorical_features: list[str]) -> Pipeline:
     preprocessor = ColumnTransformer(
         transformers=[
-            ("num", "passthrough", numeric_features),
+            ("num", StandardScaler(), numeric_features),
             (
                 "cat",
                 OneHotEncoder(handle_unknown="ignore", sparse_output=False),
@@ -258,6 +272,11 @@ def compute_fairness(
 
     # Check sensitive attribute imbalance
     group_counts = Counter(sensitive_values.astype(str))
+    if len(group_counts) < 2:
+        warnings.append(
+            "Only one sensitive group was detected in the dataset. Fairness comparison metrics "
+            "(Demographic Parity / Equalized Odds) require at least two groups to compute a difference."
+        )
     small_groups = [(group_name, count) for group_name, count in group_counts.items() if count < 10]
     if len(small_groups) > 3:
         examples = ", ".join(f"'{name}' ({count} samples)" for name, count in small_groups[:3])
@@ -386,6 +405,14 @@ def compute_fairness(
 
         y_pred = model.predict(x_test)
         y_true_values = y_test
+
+        test_group_counts = Counter(pd.Series(sensitive_test).astype(str))
+        if len(test_group_counts) < 2:
+            warnings.append(
+                "After the train-test split for proxy modeling, the test set contained only one protected group. "
+                "As a result, proxy fairness comparison metrics are exactly 0.00. "
+                "Consider providing a larger dataset or using direct predictions."
+            )
 
     dp_diff = float(
         demographic_parity_difference(

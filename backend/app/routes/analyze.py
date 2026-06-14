@@ -123,6 +123,36 @@ async def column_suggestions(file: UploadFile = File(...)) -> ColumnSuggestionRe
     return ColumnSuggestionResponse(**payload)
 
 
+class AgentMessage(BaseModel):
+    role: str
+    content: str
+
+
+class AgentRequest(BaseModel):
+    message: str
+    history: list[AgentMessage] = []
+    audit_report: dict[str, Any]
+
+
+class AgentResponse(BaseModel):
+    response: str
+
+
+@router.post("/agent", response_model=AgentResponse)
+async def chat_with_agent_endpoint(payload: AgentRequest) -> AgentResponse:
+    history_dicts = [{"role": msg.role, "content": msg.content} for msg in payload.history]
+    try:
+        response_text = llm_service.chat_with_agent(
+            message=payload.message,
+            audit_report=payload.audit_report,
+            history=history_dicts
+        )
+        return AgentResponse(response=response_text)
+    except Exception as error:
+        raise HTTPException(status_code=500, detail=str(error)) from error
+
+
+
 @router.post("/analyze", response_model=AnalyzeResponse)
 async def analyze_dataset(
     file: UploadFile = File(...),
@@ -323,15 +353,21 @@ async def analyze_dataset(
     counterfactuals = report["counterfactuals"]
     audit_narrative = report["audit_narrative"]
 
+    simulation_df = analysis_features.copy()
+    simulation_df[target] = preprocessed.labels
+    simulation_df[sensitive] = preprocessed.sensitive_values
+    if prediction_column and preprocessed.prediction_values is not None:
+        simulation_df[prediction_column] = preprocessed.prediction_values
+
     print("[SERVICES] Starting simulate_mitigation...")
     t_sim = time.time()
     simulations = simulate_mitigation(
-        dataframe=preprocessed.dataframe,
+        dataframe=simulation_df,
         target=target,
         sensitive=sensitive,
         prediction_column=prediction_column,
-        numeric_features=temporal_numeric_features,
-        categorical_features=temporal_categorical_features,
+        numeric_features=analysis_numeric_features,
+        categorical_features=analysis_categorical_features,
         target_binarization_threshold=target_binarization_threshold,
         weight_column=weight_column,
     )

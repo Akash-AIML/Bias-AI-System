@@ -1,6 +1,6 @@
 # Bias AI System
 
-AI Accountability Audit System for bias detection, traceability, and mitigation simulation with a modern UI dashboard.
+AI Audit System for bias detection, traceability, and mitigation simulation with a modern UI dashboard.
 
 ## Architecture
 
